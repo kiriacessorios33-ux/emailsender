@@ -16,7 +16,8 @@ const pool = new Pool({
   ssl: { rejectUnauthorized: false }
 });
 
-const FROM_EMAIL = "Suporte <onboarding@resend.dev>";
+const FROM_EMAIL = "App Clarity <support@claritynotify.online>";
+const REPLY_TO_EMAIL = "windz.oficial@outlook.com";
 
 function cleanEmail(email) {
   return String(email || "").trim().toLowerCase();
@@ -62,7 +63,7 @@ async function initDatabase() {
       subject TEXT NOT NULL,
       html TEXT NOT NULL,
       daily_limit INTEGER DEFAULT 30,
-      status TEXT DEFAULT 'draft',
+      status TEXT DEFAULT 'active',
       created_at TIMESTAMP DEFAULT NOW()
     );
   `);
@@ -70,8 +71,8 @@ async function initDatabase() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS email_logs (
       id SERIAL PRIMARY KEY,
-      campaign_id INTEGER REFERENCES campaigns(id) ON DELETE CASCADE,
-      contact_id INTEGER REFERENCES contacts(id) ON DELETE CASCADE,
+      campaign_id INTEGER,
+      contact_id INTEGER,
       email TEXT NOT NULL,
       status TEXT DEFAULT 'pending',
       resend_id TEXT,
@@ -80,34 +81,45 @@ async function initDatabase() {
       delivered_at TIMESTAMP,
       opened_at TIMESTAMP,
       clicked_at TIMESTAMP,
-      created_at TIMESTAMP DEFAULT NOW(),
-      UNIQUE(campaign_id, email)
+      created_at TIMESTAMP DEFAULT NOW()
     );
+  `);
+
+  await pool.query(`ALTER TABLE contacts ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'active';`);
+  await pool.query(`ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS daily_limit INTEGER DEFAULT 30;`);
+  await pool.query(`ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'active';`);
+  await pool.query(`ALTER TABLE email_logs ADD COLUMN IF NOT EXISTS contact_id INTEGER;`);
+  await pool.query(`ALTER TABLE email_logs ADD COLUMN IF NOT EXISTS sent_at TIMESTAMP;`);
+  await pool.query(`ALTER TABLE email_logs ADD COLUMN IF NOT EXISTS delivered_at TIMESTAMP;`);
+  await pool.query(`ALTER TABLE email_logs ADD COLUMN IF NOT EXISTS opened_at TIMESTAMP;`);
+  await pool.query(`ALTER TABLE email_logs ADD COLUMN IF NOT EXISTS clicked_at TIMESTAMP;`);
+
+  await pool.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS email_logs_campaign_email_unique
+    ON email_logs (campaign_id, email);
   `);
 
   console.log("Database ready");
 }
 
-initDatabase().catch(console.error);
-
 app.get("/", async (req, res) => {
   const contactsTotal = await pool.query(`SELECT COUNT(*) FROM contacts`);
   const campaignsTotal = await pool.query(`SELECT COUNT(*) FROM campaigns`);
   const pendingTotal = await pool.query(`SELECT COUNT(*) FROM email_logs WHERE status = 'pending'`);
+
   const sentToday = await pool.query(`
-    SELECT COUNT(*) FROM email_logs 
-    WHERE status = 'sent' 
+    SELECT COUNT(*) FROM email_logs
+    WHERE status = 'sent'
     AND DATE(sent_at) = CURRENT_DATE
   `);
 
   const sentTotal = await pool.query(`SELECT COUNT(*) FROM email_logs WHERE status = 'sent'`);
   const errorsTotal = await pool.query(`SELECT COUNT(*) FROM email_logs WHERE status = 'error'`);
-  const deliveredTotal = await pool.query(`SELECT COUNT(*) FROM email_logs WHERE status = 'delivered'`);
   const openedTotal = await pool.query(`SELECT COUNT(*) FROM email_logs WHERE opened_at IS NOT NULL`);
   const clickedTotal = await pool.query(`SELECT COUNT(*) FROM email_logs WHERE clicked_at IS NOT NULL`);
 
   const campaigns = await pool.query(`
-    SELECT 
+    SELECT
       c.*,
       COUNT(l.id) AS total_queue,
       COUNT(l.id) FILTER (WHERE l.status = 'pending') AS pending_count,
@@ -139,139 +151,29 @@ app.get("/", async (req, res) => {
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Email Marketing Dashboard</title>
+  <title>App Clarity Dashboard</title>
   <style>
     *{box-sizing:border-box}
-    body{
-      margin:0;
-      background:#0b0b12;
-      color:#fff;
-      font-family:Arial, sans-serif;
-    }
-    .layout{
-      display:flex;
-      min-height:100vh;
-    }
-    .sidebar{
-      width:260px;
-      background:#11111d;
-      padding:25px;
-      border-right:1px solid #24243a;
-      position:fixed;
-      top:0;
-      bottom:0;
-      left:0;
-    }
-    .sidebar h2{
-      margin-top:0;
-      color:#a78bfa;
-    }
-    .sidebar a{
-      display:block;
-      color:#ddd;
-      text-decoration:none;
-      padding:12px;
-      border-radius:10px;
-      margin-bottom:8px;
-      background:#181827;
-    }
-    .main{
-      margin-left:260px;
-      width:calc(100% - 260px);
-      padding:30px;
-    }
-    .top{
-      display:flex;
-      justify-content:space-between;
-      align-items:center;
-      margin-bottom:25px;
-    }
-    .grid{
-      display:grid;
-      grid-template-columns:repeat(4, 1fr);
-      gap:15px;
-      margin-bottom:30px;
-    }
-    .card{
-      background:#161625;
-      border:1px solid #292945;
-      border-radius:16px;
-      padding:20px;
-      margin-bottom:20px;
-    }
-    .stat{
-      font-size:28px;
-      font-weight:bold;
-      margin-bottom:5px;
-    }
-    .muted{
-      color:#aaa;
-      font-size:14px;
-    }
-    input, textarea, select{
-      width:100%;
-      padding:13px;
-      margin-top:8px;
-      margin-bottom:15px;
-      background:#0f0f1a;
-      border:1px solid #33334f;
-      color:white;
-      border-radius:10px;
-      font-size:14px;
-    }
-    textarea{
-      min-height:180px;
-      font-family:monospace;
-    }
-    button{
-      background:#7c3aed;
-      color:white;
-      border:none;
-      padding:13px 20px;
-      border-radius:10px;
-      cursor:pointer;
-      font-size:15px;
-      font-weight:bold;
-    }
-    button.secondary{
-      background:#292945;
-    }
-    button.danger{
-      background:#dc2626;
-    }
-    table{
-      width:100%;
-      border-collapse:collapse;
-      margin-top:15px;
-    }
-    th,td{
-      padding:12px;
-      border-bottom:1px solid #292945;
-      text-align:left;
-      font-size:14px;
-    }
-    th{
-      color:#a78bfa;
-    }
-    .row{
-      display:grid;
-      grid-template-columns:1fr 1fr;
-      gap:20px;
-    }
-    iframe{
-      width:100%;
-      height:380px;
-      background:white;
-      border:none;
-      border-radius:12px;
-    }
-    .badge{
-      padding:5px 9px;
-      border-radius:999px;
-      font-size:12px;
-      background:#33334f;
-      display:inline-block;
-    }
+    body{margin:0;background:#0b0b12;color:#fff;font-family:Arial,sans-serif}
+    .layout{display:flex;min-height:100vh}
+    .sidebar{width:260px;background:#11111d;padding:25px;border-right:1px solid #24243a;position:fixed;top:0;bottom:0;left:0}
+    .sidebar h2{margin-top:0;color:#a78bfa}
+    .sidebar a{display:block;color:#ddd;text-decoration:none;padding:12px;border-radius:10px;margin-bottom:8px;background:#181827}
+    .main{margin-left:260px;width:calc(100% - 260px);padding:30px}
+    .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:15px;margin-bottom:30px}
+    .card{background:#161625;border:1px solid #292945;border-radius:16px;padding:20px;margin-bottom:20px}
+    .stat{font-size:28px;font-weight:bold;margin-bottom:5px}
+    .muted{color:#aaa;font-size:14px}
+    input,textarea,select{width:100%;padding:13px;margin-top:8px;margin-bottom:15px;background:#0f0f1a;border:1px solid #33334f;color:white;border-radius:10px;font-size:14px}
+    textarea{min-height:180px;font-family:monospace}
+    button{background:#7c3aed;color:white;border:none;padding:12px 18px;border-radius:10px;cursor:pointer;font-size:14px;font-weight:bold;margin:2px}
+    button.secondary{background:#292945}
+    table{width:100%;border-collapse:collapse;margin-top:15px}
+    th,td{padding:12px;border-bottom:1px solid #292945;text-align:left;font-size:14px}
+    th{color:#a78bfa}
+    .row{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+    iframe{width:100%;height:380px;background:white;border:none;border-radius:12px}
+    .badge{padding:5px 9px;border-radius:999px;font-size:12px;background:#33334f;display:inline-block}
     .success{background:#166534}
     .pending{background:#92400e}
     .error{background:#991b1b}
@@ -281,7 +183,7 @@ app.get("/", async (req, res) => {
 <body>
 <div class="layout">
   <div class="sidebar">
-    <h2>EmailPro</h2>
+    <h2>App Clarity</h2>
     <a href="#dashboard">Dashboard</a>
     <a href="#importar">Importar Lista</a>
     <a href="#template">Templates HTML</a>
@@ -291,62 +193,23 @@ app.get("/", async (req, res) => {
   </div>
 
   <div class="main">
-    <div class="top">
-      <div>
-        <h1 id="dashboard">Dashboard</h1>
-        <div class="muted">Painel de controle da sua plataforma de email marketing</div>
-      </div>
-    </div>
+    <h1 id="dashboard">Dashboard</h1>
+    <p class="muted">Painel profissional da sua plataforma de email marketing.</p>
 
     <div class="grid">
-      <div class="card">
-        <div class="stat">${contactsTotal.rows[0].count}</div>
-        <div class="muted">Contatos salvos</div>
-      </div>
-
-      <div class="card">
-        <div class="stat">${campaignsTotal.rows[0].count}</div>
-        <div class="muted">Campanhas criadas</div>
-      </div>
-
-      <div class="card">
-        <div class="stat">${pendingTotal.rows[0].count}</div>
-        <div class="muted">Pendentes na fila</div>
-      </div>
-
-      <div class="card">
-        <div class="stat">${sentToday.rows[0].count}</div>
-        <div class="muted">Enviados hoje</div>
-      </div>
-
-      <div class="card">
-        <div class="stat">${sentTotal.rows[0].count}</div>
-        <div class="muted">Total enviados</div>
-      </div>
-
-      <div class="card">
-        <div class="stat">${errorsTotal.rows[0].count}</div>
-        <div class="muted">Erros</div>
-      </div>
-
-      <div class="card">
-        <div class="stat">${openedTotal.rows[0].count}</div>
-        <div class="muted">Aberturas</div>
-      </div>
-
-      <div class="card">
-        <div class="stat">${clickedTotal.rows[0].count}</div>
-        <div class="muted">Cliques</div>
-      </div>
+      <div class="card"><div class="stat">${contactsTotal.rows[0].count}</div><div class="muted">Contatos salvos</div></div>
+      <div class="card"><div class="stat">${campaignsTotal.rows[0].count}</div><div class="muted">Campanhas</div></div>
+      <div class="card"><div class="stat">${pendingTotal.rows[0].count}</div><div class="muted">Pendentes</div></div>
+      <div class="card"><div class="stat">${sentToday.rows[0].count}</div><div class="muted">Enviados hoje</div></div>
+      <div class="card"><div class="stat">${sentTotal.rows[0].count}</div><div class="muted">Total enviados</div></div>
+      <div class="card"><div class="stat">${errorsTotal.rows[0].count}</div><div class="muted">Erros</div></div>
+      <div class="card"><div class="stat">${openedTotal.rows[0].count}</div><div class="muted">Aberturas</div></div>
+      <div class="card"><div class="stat">${clickedTotal.rows[0].count}</div><div class="muted">Cliques</div></div>
     </div>
 
     <div class="card" id="importar">
       <h2>Importar Lista de Emails</h2>
-      <p class="muted">
-        Aqui você pode subir seus 7 mil emails uma vez. Depois pode subir listas novas todos os dias.
-        O sistema ignora emails repetidos automaticamente.
-      </p>
-
+      <p class="muted">Suba seus contatos uma vez. Depois você pode importar novos emails todos os dias. O sistema ignora duplicados.</p>
       <form action="/import-contacts" method="POST" enctype="multipart/form-data">
         <label>Arquivo TXT ou CSV</label>
         <input type="file" name="file" accept=".txt,.csv" required>
@@ -357,13 +220,12 @@ app.get("/", async (req, res) => {
     <div class="row">
       <div class="card" id="template">
         <h2>Salvar Template HTML</h2>
-
         <form action="/save-template" method="POST">
           <label>Nome do Template</label>
           <input type="text" name="name" placeholder="Ex: Oferta Principal" required>
 
           <label>Assunto padrão</label>
-          <input type="text" name="subject" placeholder="Ex: Uma condição especial para você" required>
+          <input type="text" name="subject" placeholder="Ex: Oferta especial" required>
 
           <label>HTML do Email</label>
           <textarea id="templateHtml" name="html" placeholder="<h1>Sua oferta</h1>" required></textarea>
@@ -381,17 +243,13 @@ app.get("/", async (req, res) => {
 
     <div class="card" id="campanha">
       <h2>Criar Campanha</h2>
-      <p class="muted">
-        A campanha cria uma fila com todos os contatos ativos. Depois você envia por lote, aos poucos.
-      </p>
+      <p class="muted">A campanha cria uma fila com os contatos ativos. Depois você envia por lote.</p>
 
       <form action="/create-campaign" method="POST">
         <label>Usar template salvo</label>
         <select id="templateSelect" onchange="loadTemplate()">
           <option value="">Escolher template...</option>
-          ${templates.rows.map(t => `
-            <option value="${t.id}">${escapeHtml(t.name)}</option>
-          `).join("")}
+          ${templates.rows.map(t => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join("")}
         </select>
 
         <label>Nome da Campanha</label>
@@ -413,7 +271,6 @@ app.get("/", async (req, res) => {
 
     <div class="card" id="campanhas">
       <h2>Campanhas</h2>
-
       <table>
         <tr>
           <th>Campanha</th>
@@ -426,7 +283,6 @@ app.get("/", async (req, res) => {
           <th>Cliques</th>
           <th>Ação</th>
         </tr>
-
         ${campaigns.rows.map(c => `
           <tr>
             <td>${escapeHtml(c.name)}</td>
@@ -441,7 +297,6 @@ app.get("/", async (req, res) => {
               <form action="/send-batch/${c.id}" method="POST" style="display:inline;">
                 <button type="submit">Enviar lote</button>
               </form>
-
               <form action="/add-new-to-campaign/${c.id}" method="POST" style="display:inline;">
                 <button class="secondary" type="submit">Add novos</button>
               </form>
@@ -453,7 +308,6 @@ app.get("/", async (req, res) => {
 
     <div class="card" id="logs">
       <h2>Últimos Envios</h2>
-
       <table>
         <tr>
           <th>Email</th>
@@ -461,17 +315,14 @@ app.get("/", async (req, res) => {
           <th>Erro</th>
           <th>Data</th>
         </tr>
-
         ${recentLogs.rows.map(log => `
           <tr>
             <td>${escapeHtml(log.email)}</td>
-            <td>
-              <span class="badge ${
-                log.status === "sent" ? "success" :
-                log.status === "pending" ? "pending" :
-                log.status === "error" ? "error" : ""
-              }">${escapeHtml(log.status)}</span>
-            </td>
+            <td><span class="badge ${
+              log.status === "sent" ? "success" :
+              log.status === "pending" ? "pending" :
+              log.status === "error" ? "error" : ""
+            }">${escapeHtml(log.status)}</span></td>
             <td>${escapeHtml(log.error_message || "")}</td>
             <td>${log.created_at ? new Date(log.created_at).toLocaleString("pt-BR") : ""}</td>
           </tr>
@@ -496,7 +347,9 @@ app.get("/", async (req, res) => {
 
   function loadTemplate() {
     const id = document.getElementById("templateSelect").value;
-    const selected = templates.find(t => String(t.id) === String(id));
+    const selected = templates.find(function(t) {
+      return String(t.id) === String(id);
+    });
 
     if (!selected) return;
 
@@ -536,11 +389,8 @@ app.post("/import-contacts", upload.single("file"), async (req, res) => {
         [email]
       );
 
-      if (result.rows.length > 0) {
-        inserted++;
-      } else {
-        duplicated++;
-      }
+      if (result.rows.length > 0) inserted++;
+      else duplicated++;
     }
 
     res.send(`
@@ -667,6 +517,7 @@ app.post("/send-batch/:id", async (req, res) => {
         const data = await resend.emails.send({
           from: FROM_EMAIL,
           to: item.email,
+          replyTo: REPLY_TO_EMAIL,
           subject: campaign.subject,
           html: campaign.html
         });
@@ -730,6 +581,13 @@ ${escapeHtml(JSON.stringify(results, null, 2))}
 
 const PORT = process.env.PORT || 3000;
 
-app.listen(PORT, () => {
-  console.log("Email marketing dashboard online");
-});
+initDatabase()
+  .then(() => {
+    app.listen(PORT, () => {
+      console.log("App Clarity email dashboard online");
+    });
+  })
+  .catch(error => {
+    console.error("Database init error:", error);
+    process.exit(1);
+  });
