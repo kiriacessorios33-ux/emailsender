@@ -1,7 +1,11 @@
 const express = require("express");
 const { Resend } = require("resend");
+const multer = require("multer");
 
 const app = express();
+
+const upload = multer({ storage: multer.memoryStorage() });
+
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 app.use(express.json({ limit: "10mb" }));
 
@@ -9,104 +13,214 @@ const resend = new Resend(process.env.RESEND_API_KEY);
 
 app.get("/", (req, res) => {
   res.send(`
-    <html>
-      <head>
-        <title>Email Sender</title>
-        <style>
-          body { font-family: Arial; background:#111; color:white; padding:40px; }
-          .box { max-width:850px; margin:auto; }
-          input, textarea {
-            width:100%; padding:12px; margin:10px 0 20px;
-            border:none; border-radius:8px; font-size:15px;
-          }
-          button {
-            background:#7c3aed; color:white; border:none;
-            padding:15px 25px; border-radius:10px; cursor:pointer; font-size:16px;
-          }
-          small { color:#bbb; }
-        </style>
-      </head>
-      <body>
-        <div class="box">
-          <h1>Bulk Email Sender</h1>
+  <html>
 
-          <form action="/send-bulk" method="POST">
-            <label>Emails dos clientes, um por linha:</label>
-            <textarea name="emails" rows="8" placeholder="cliente1@gmail.com&#10;cliente2@hotmail.com" required></textarea>
+    <head>
 
-            <label>Assunto:</label>
-            <input name="subject" placeholder="Assunto do email" required />
+      <title>Bulk Email Sender</title>
 
-            <label>HTML do email:</label>
-            <textarea name="html" rows="14" placeholder="<h1>Seu relatório está pronto</h1><p>Clique abaixo...</p>" required></textarea>
+      <style>
 
-            <label>Limite de envio agora:</label>
-            <input name="limit" value="30" />
+        body{
+          background:#111;
+          color:white;
+          font-family:Arial;
+          padding:40px;
+        }
 
-            <small>Recomendado no início: 20 a 50 por disparo.</small>
-            <br><br>
+        .box{
+          max-width:900px;
+          margin:auto;
+        }
 
-            <button type="submit">Enviar Disparo</button>
-          </form>
+        input, textarea{
+          width:100%;
+          padding:12px;
+          margin-top:10px;
+          margin-bottom:20px;
+          border:none;
+          border-radius:10px;
+          font-size:15px;
+        }
+
+        button{
+          background:#7c3aed;
+          color:white;
+          border:none;
+          padding:15px 25px;
+          border-radius:10px;
+          cursor:pointer;
+          font-size:16px;
+        }
+
+        h1{
+          margin-bottom:30px;
+        }
+
+        .info{
+          color:#aaa;
+          margin-bottom:20px;
+        }
+
+      </style>
+
+    </head>
+
+    <body>
+
+      <div class="box">
+
+        <h1>Bulk Email Sender</h1>
+
+        <div class="info">
+          Importe TXT ou CSV com emails.
         </div>
-      </body>
-    </html>
+
+        <form action="/send-bulk" method="POST" enctype="multipart/form-data">
+
+          <label>Arquivo TXT ou CSV:</label>
+
+          <input
+            type="file"
+            name="file"
+            accept=".txt,.csv"
+            required
+          />
+
+          <label>Assunto:</label>
+
+          <input
+            type="text"
+            name="subject"
+            placeholder="Assunto do email"
+            required
+          />
+
+          <label>HTML do Email:</label>
+
+          <textarea
+            name="html"
+            rows="15"
+            placeholder="<h1>Promoção</h1>"
+            required
+          ></textarea>
+
+          <label>Quantidade para enviar:</label>
+
+          <input
+            type="number"
+            name="limit"
+            value="30"
+          />
+
+          <button type="submit">
+            Iniciar Disparo
+          </button>
+
+        </form>
+
+      </div>
+
+    </body>
+
+  </html>
   `);
 });
 
-app.post("/send-bulk", async (req, res) => {
-  const { emails, subject, html, limit } = req.body;
+app.post("/send-bulk", upload.single("file"), async (req, res) => {
 
-  const list = emails
-    .split(/\r?\n/)
-    .map(e => e.trim())
-    .filter(e => e.includes("@"));
+  try {
 
-  const max = Math.min(parseInt(limit || "30"), list.length);
+    const fileContent = req.file.buffer.toString("utf-8");
 
-  const results = [];
+    const emails = fileContent
+      .split(/\r?\n|,/)
+      .map(email => email.trim())
+      .filter(email => email.includes("@"));
 
-  for (let i = 0; i < max; i++) {
-    const to = list[i];
+    const subject = req.body.subject;
+    const html = req.body.html;
 
-    try {
-      const data = await resend.emails.send({
-        from: "Clarity Notify <notify@claritynotify.online>",
-        to,
-        subject,
-        html: `
-          ${html}
-          <br><br>
-          <hr>
-          <p style="font-size:12px;color:#777;">
-            You are receiving this email because you requested or interacted with our service.
-          </p>
-        `
-      });
+    const limit = parseInt(req.body.limit || "30");
 
-      results.push({ email: to, status: "sent", id: data.id });
+    const results = [];
 
-      await new Promise(resolve => setTimeout(resolve, 1500));
+    for(let i = 0; i < Math.min(limit, emails.length); i++){
 
-    } catch (error) {
-      results.push({ email: to, status: "error", error: error.message });
+      const to = emails[i];
+
+      try {
+
+        const data = await resend.emails.send({
+
+          from: "Suporte <onboarding@resend.dev>",
+
+          to,
+
+          subject,
+
+          html
+
+        });
+
+        results.push({
+          email: to,
+          status: "sent",
+          id: data.id
+        });
+
+        await new Promise(resolve => setTimeout(resolve, 1500));
+
+      } catch(error){
+
+        results.push({
+          email: to,
+          status: "error",
+          error: error.message
+        });
+
+      }
+
     }
+
+    res.send(`
+
+      <html>
+
+        <body style="background:#111;color:white;font-family:Arial;padding:40px;">
+
+          <h1>Disparo Finalizado</h1>
+
+          <p>Total processado: ${results.length}</p>
+
+          <pre style="background:#222;padding:20px;border-radius:10px;">
+${JSON.stringify(results, null, 2)}
+          </pre>
+
+          <a href="/" style="color:#8b5cf6;">
+            Voltar
+          </a>
+
+        </body>
+
+      </html>
+
+    `);
+
+  } catch(error){
+
+    console.log(error);
+
+    res.status(500).send("Erro no disparo");
+
   }
 
-  res.send(`
-    <html>
-      <body style="font-family:Arial;background:#111;color:white;padding:40px;">
-        <h1>Disparo finalizado</h1>
-        <p>Total processado: ${results.length}</p>
-        <pre style="background:#222;padding:20px;border-radius:10px;">${JSON.stringify(results, null, 2)}</pre>
-        <a href="/" style="color:#a78bfa;">Voltar</a>
-      </body>
-    </html>
-  `);
 });
 
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
-  console.log("Bulk email sender running");
+
+  console.log("Bulk sender online");
+
 });
