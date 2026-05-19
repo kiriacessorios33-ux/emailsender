@@ -55,31 +55,28 @@ function escapeHtml(value) {
 }
 
 function isAllowedUrl(url) {
-  return ALLOWED_LINKS.some(function(allowedLink) {
-    return String(url || "").startsWith(allowedLink);
+  return ALLOWED_LINKS.some(function(link) {
+    return String(url || "").startsWith(link);
   });
 }
 
 function addTrackingToHtml(html, logId) {
   let modifiedHtml = String(html || "");
 
-  modifiedHtml = modifiedHtml.replace(
-    /href=(["'])(.*?)\1/gi,
-    function(match, quote, originalUrl) {
-      if (!isAllowedUrl(originalUrl)) {
-        return match;
-      }
-
-      const trackingUrl =
-        APP_URL +
-        "/click/" +
-        encodeURIComponent(logId) +
-        "?url=" +
-        encodeURIComponent(originalUrl);
-
-      return "href=" + quote + trackingUrl + quote;
+  modifiedHtml = modifiedHtml.replace(/href=(["'])(.*?)\1/gi, function(match, quote, originalUrl) {
+    if (!isAllowedUrl(originalUrl)) {
+      return match;
     }
-  );
+
+    const trackingUrl =
+      APP_URL +
+      "/click/" +
+      encodeURIComponent(logId) +
+      "?url=" +
+      encodeURIComponent(originalUrl);
+
+    return "href=" + quote + trackingUrl + quote;
+  });
 
   const pixel =
     '<img src="' +
@@ -213,51 +210,52 @@ app.get("/open/:id.png", async (req, res) => {
 });
 
 app.get("/", async (req, res) => {
-  const contactsTotal = await pool.query(`SELECT COUNT(*) FROM contacts`);
-  const campaignsTotal = await pool.query(`SELECT COUNT(*) FROM campaigns`);
-  const pendingTotal = await pool.query(`SELECT COUNT(*) FROM email_logs WHERE status = 'pending'`);
+  try {
+    const contactsTotal = await pool.query(`SELECT COUNT(*) FROM contacts`);
+    const campaignsTotal = await pool.query(`SELECT COUNT(*) FROM campaigns`);
+    const pendingTotal = await pool.query(`SELECT COUNT(*) FROM email_logs WHERE status = 'pending'`);
 
-  const sentToday = await pool.query(`
-    SELECT COUNT(*) FROM email_logs
-    WHERE status = 'sent'
-    AND DATE(sent_at) = CURRENT_DATE
-  `);
+    const sentToday = await pool.query(`
+      SELECT COUNT(*) FROM email_logs
+      WHERE status = 'sent'
+      AND DATE(sent_at) = CURRENT_DATE
+    `);
 
-  const sentTotal = await pool.query(`SELECT COUNT(*) FROM email_logs WHERE status = 'sent'`);
-  const errorsTotal = await pool.query(`SELECT COUNT(*) FROM email_logs WHERE status = 'error'`);
-  const openedTotal = await pool.query(`SELECT COUNT(*) FROM email_logs WHERE opened_at IS NOT NULL`);
-  const clickedTotal = await pool.query(`SELECT COUNT(*) FROM email_logs WHERE clicked_at IS NOT NULL`);
+    const sentTotal = await pool.query(`SELECT COUNT(*) FROM email_logs WHERE status = 'sent'`);
+    const errorsTotal = await pool.query(`SELECT COUNT(*) FROM email_logs WHERE status = 'error'`);
+    const openedTotal = await pool.query(`SELECT COUNT(*) FROM email_logs WHERE opened_at IS NOT NULL`);
+    const clickedTotal = await pool.query(`SELECT COUNT(*) FROM email_logs WHERE clicked_at IS NOT NULL`);
 
-  const campaigns = await pool.query(`
-    SELECT
-      c.*,
-      COUNT(l.id) AS total_queue,
-      COUNT(l.id) FILTER (WHERE l.status = 'pending') AS pending_count,
-      COUNT(l.id) FILTER (WHERE l.status = 'sent') AS sent_count,
-      COUNT(l.id) FILTER (WHERE l.status = 'error') AS error_count,
-      COUNT(l.id) FILTER (WHERE l.opened_at IS NOT NULL) AS open_count,
-      COUNT(l.id) FILTER (WHERE l.clicked_at IS NOT NULL) AS click_count
-    FROM campaigns c
-    LEFT JOIN email_logs l ON l.campaign_id = c.id
-    GROUP BY c.id
-    ORDER BY c.created_at DESC
-    LIMIT 20
-  `);
+    const campaigns = await pool.query(`
+      SELECT
+        c.*,
+        COUNT(l.id) AS total_queue,
+        COUNT(l.id) FILTER (WHERE l.status = 'pending') AS pending_count,
+        COUNT(l.id) FILTER (WHERE l.status = 'sent') AS sent_count,
+        COUNT(l.id) FILTER (WHERE l.status = 'error') AS error_count,
+        COUNT(l.id) FILTER (WHERE l.opened_at IS NOT NULL) AS open_count,
+        COUNT(l.id) FILTER (WHERE l.clicked_at IS NOT NULL) AS click_count
+      FROM campaigns c
+      LEFT JOIN email_logs l ON l.campaign_id = c.id
+      GROUP BY c.id
+      ORDER BY c.created_at DESC
+      LIMIT 20
+    `);
 
-  const templates = await pool.query(`
-    SELECT * FROM templates
-    ORDER BY created_at DESC
-  `);
+    const templates = await pool.query(`
+      SELECT * FROM templates
+      ORDER BY created_at DESC
+    `);
 
-  const recentLogs = await pool.query(`
-    SELECT * FROM email_logs
-    ORDER BY created_at DESC
-    LIMIT 30
-  `);
+    const recentLogs = await pool.query(`
+      SELECT * FROM email_logs
+      ORDER BY created_at DESC
+      LIMIT 30
+    `);
 
-  const templatesJson = JSON.stringify(templates.rows).replaceAll("<", "\\u003c");
+    const templatesJson = JSON.stringify(templates.rows).replaceAll("<", "\\u003c");
 
-  res.send(`
+    res.send(`
 <!DOCTYPE html>
 <html>
 <head>
@@ -378,9 +376,9 @@ app.get("/", async (req, res) => {
         <button type="submit">Criar Campanha e Fila</button>
       </form>
     </div>
-
-    <div class="card" id="campanhas">
+        <div class="card" id="campanhas">
       <h2>Campanhas</h2>
+
       <table>
         <tr>
           <th>Campanha</th>
@@ -393,31 +391,46 @@ app.get("/", async (req, res) => {
           <th>Cliques</th>
           <th>Ação</th>
         </tr>
+
         ${campaigns.rows.map(c => `
           <tr>
             <td>${escapeHtml(c.name)}</td>
-            <td><span class="badge">${escapeHtml(c.status)}</span></td>
+
+            <td>
+              <span class="badge">
+                ${escapeHtml(c.status)}
+              </span>
+            </td>
+
             <td>${c.total_queue}</td>
             <td>${c.pending_count}</td>
             <td>${c.sent_count}</td>
             <td>${c.error_count}</td>
             <td>${c.open_count}</td>
             <td>${c.click_count}</td>
+
             <td>
               <form action="/send-batch/${c.id}" method="POST" style="display:inline;">
-                <button type="submit">Enviar lote</button>
+                <button type="submit">
+                  Enviar lote
+                </button>
               </form>
+
               <form action="/add-new-to-campaign/${c.id}" method="POST" style="display:inline;">
-                <button class="secondary" type="submit">Add novos</button>
+                <button class="secondary" type="submit">
+                  Add novos
+                </button>
               </form>
             </td>
           </tr>
         `).join("")}
+
       </table>
     </div>
 
     <div class="card" id="logs">
       <h2>Últimos Envios</h2>
+
       <table>
         <tr>
           <th>Email</th>
@@ -427,22 +440,43 @@ app.get("/", async (req, res) => {
           <th>Erro</th>
           <th>Data</th>
         </tr>
+
         ${recentLogs.rows.map(log => `
           <tr>
             <td>${escapeHtml(log.email)}</td>
-            <td><span class="badge ${
-              log.status === "sent" ? "success" :
-              log.status === "pending" ? "pending" :
-              log.status === "error" ? "error" : ""
-            }">${escapeHtml(log.status)}</span></td>
+
+            <td>
+              <span class="badge ${
+                log.status === "sent"
+                  ? "success"
+                  : log.status === "pending"
+                  ? "pending"
+                  : "error"
+              }">
+                ${escapeHtml(log.status)}
+              </span>
+            </td>
+
             <td>${log.opened_at ? "Sim" : "Não"}</td>
             <td>${log.clicked_at ? "Sim" : "Não"}</td>
-            <td>${escapeHtml(log.error_message || "")}</td>
-            <td>${log.created_at ? new Date(log.created_at).toLocaleString("pt-BR") : ""}</td>
+
+            <td>
+              ${escapeHtml(log.error_message || "")}
+            </td>
+
+            <td>
+              ${
+                log.created_at
+                  ? new Date(log.created_at).toLocaleString("pt-BR")
+                  : ""
+              }
+            </td>
           </tr>
         `).join("")}
+
       </table>
     </div>
+
   </div>
 </div>
 
@@ -461,11 +495,14 @@ app.get("/", async (req, res) => {
 
   function loadTemplate() {
     const id = document.getElementById("templateSelect").value;
+
     const selected = templates.find(function(t) {
       return String(t.id) === String(id);
     });
 
-    if (!selected) return;
+    if (!selected) {
+      return;
+    }
 
     document.getElementById("campaignSubject").value = selected.subject;
     document.getElementById("campaignHtml").value = selected.html;
@@ -475,13 +512,18 @@ app.get("/", async (req, res) => {
 
 </body>
 </html>
-  `);
+    `);
+
+  } catch (error) {
+    console.error(error);
+    res.status(500).send("Erro ao carregar dashboard");
+  }
 });
 
 app.post("/import-contacts", upload.single("file"), async (req, res) => {
   try {
     if (!req.file || !req.file.buffer) {
-      return res.status(400).send("Nenhum arquivo enviado");
+      return res.status(400).send("Arquivo não enviado");
     }
 
     const fileContent = req.file.buffer.toString("utf-8");
@@ -507,19 +549,31 @@ app.post("/import-contacts", upload.single("file"), async (req, res) => {
         [email]
       );
 
-      if (result.rows.length > 0) inserted++;
-      else duplicated++;
+      if (result.rows.length > 0) {
+        inserted++;
+      } else {
+        duplicated++;
+      }
     }
 
     res.send(`
       <body style="background:#111;color:white;font-family:Arial;padding:40px;">
+
         <h1>Importação finalizada</h1>
+
         <p>Novos contatos: ${inserted}</p>
+
         <p>Duplicados ignorados: ${duplicated}</p>
+
         <p>Total lido no arquivo: ${uniqueEmails.length}</p>
-        <a style="color:#a78bfa;" href="/">Voltar ao painel</a>
+
+        <a style="color:#a78bfa;" href="/">
+          Voltar ao painel
+        </a>
+
       </body>
     `);
+
   } catch (error) {
     console.error(error);
     res.status(500).send("Erro ao importar contatos");
@@ -539,6 +593,7 @@ app.post("/save-template", async (req, res) => {
     );
 
     res.redirect("/");
+
   } catch (error) {
     console.error(error);
     res.status(500).send("Erro ao salvar template");
@@ -551,27 +606,49 @@ app.post("/create-campaign", async (req, res) => {
 
     const campaignResult = await pool.query(
       `
-      INSERT INTO campaigns (name, subject, html, daily_limit, status)
+      INSERT INTO campaigns (
+        name,
+        subject,
+        html,
+        daily_limit,
+        status
+      )
       VALUES ($1, $2, $3, $4, 'active')
       RETURNING id
       `,
-      [name, subject, html, parseInt(dailyLimit || "30")]
+      [
+        name,
+        subject,
+        html,
+        parseInt(dailyLimit || "30")
+      ]
     );
 
     const campaignId = campaignResult.rows[0].id;
 
     await pool.query(
       `
-      INSERT INTO email_logs (campaign_id, contact_id, email, status)
-      SELECT $1, id, email, 'pending'
+      INSERT INTO email_logs (
+        campaign_id,
+        contact_id,
+        email,
+        status
+      )
+      SELECT
+        $1,
+        id,
+        email,
+        'pending'
       FROM contacts
       WHERE status = 'active'
-      ON CONFLICT (campaign_id, email) DO NOTHING
+      ON CONFLICT (campaign_id, email)
+      DO NOTHING
       `,
       [campaignId]
     );
 
     res.redirect("/");
+
   } catch (error) {
     console.error(error);
     res.status(500).send("Erro ao criar campanha");
@@ -584,21 +661,33 @@ app.post("/add-new-to-campaign/:id", async (req, res) => {
 
     await pool.query(
       `
-      INSERT INTO email_logs (campaign_id, contact_id, email, status)
-      SELECT $1, id, email, 'pending'
+      INSERT INTO email_logs (
+        campaign_id,
+        contact_id,
+        email,
+        status
+      )
+      SELECT
+        $1,
+        id,
+        email,
+        'pending'
       FROM contacts
       WHERE status = 'active'
-      ON CONFLICT (campaign_id, email) DO NOTHING
+      ON CONFLICT (campaign_id, email)
+      DO NOTHING
       `,
       [campaignId]
     );
 
     res.redirect("/");
+
   } catch (error) {
     console.error(error);
     res.status(500).send("Erro ao adicionar novos contatos");
   }
 });
+
 app.post("/send-batch/:id", async (req, res) => {
   try {
     const campaignId = req.params.id;
@@ -623,15 +712,22 @@ app.post("/send-batch/:id", async (req, res) => {
       ORDER BY id ASC
       LIMIT $2
       `,
-      [campaignId, campaign.daily_limit]
+      [
+        campaignId,
+        campaign.daily_limit
+      ]
     );
 
     const pending = pendingResult.rows;
+
     const results = [];
 
     for (const item of pending) {
       try {
-        const trackedHtml = addTrackingToHtml(campaign.html, item.id);
+        const trackedHtml = addTrackingToHtml(
+          campaign.html,
+          item.id
+        );
 
         const data = await resend.emails.send({
           from: FROM_EMAIL,
@@ -644,13 +740,17 @@ app.post("/send-batch/:id", async (req, res) => {
         await pool.query(
           `
           UPDATE email_logs
-          SET status = 'sent',
-              resend_id = $1,
-              sent_at = NOW(),
-              error_message = NULL
+          SET
+            status = 'sent',
+            resend_id = $1,
+            sent_at = NOW(),
+            error_message = NULL
           WHERE id = $2
           `,
-          [data.id, item.id]
+          [
+            data.id,
+            item.id
+          ]
         );
 
         results.push({
@@ -660,15 +760,20 @@ app.post("/send-batch/:id", async (req, res) => {
         });
 
         await new Promise(resolve => setTimeout(resolve, 1500));
+
       } catch (error) {
         await pool.query(
           `
           UPDATE email_logs
-          SET status = 'error',
-              error_message = $1
+          SET
+            status = 'error',
+            error_message = $1
           WHERE id = $2
           `,
-          [error.message, item.id]
+          [
+            error.message,
+            item.id
+          ]
         );
 
         results.push({
@@ -681,17 +786,30 @@ app.post("/send-batch/:id", async (req, res) => {
 
     res.send(`
       <body style="background:#111;color:white;font-family:Arial;padding:40px;">
+
         <h1>Lote enviado</h1>
-        <p>Campanha: ${escapeHtml(campaign.name)}</p>
-        <p>Total processado: ${results.length}</p>
+
+        <p>
+          Campanha:
+          ${escapeHtml(campaign.name)}
+        </p>
+
+        <p>
+          Total processado:
+          ${results.length}
+        </p>
 
         <pre style="background:#222;padding:20px;border-radius:10px;white-space:pre-wrap;">
 ${escapeHtml(JSON.stringify(results, null, 2))}
         </pre>
 
-        <a style="color:#a78bfa;" href="/">Voltar ao painel</a>
+        <a style="color:#a78bfa;" href="/">
+          Voltar ao painel
+        </a>
+
       </body>
     `);
+
   } catch (error) {
     console.error(error);
     res.status(500).send("Erro ao enviar lote");
