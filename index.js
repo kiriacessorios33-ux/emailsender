@@ -17,7 +17,9 @@ function createDependencies() {
       connectionString: process.env.DATABASE_URL,
       ssl: process.env.NODE_ENV === "test" ? false : { rejectUnauthorized: false }
     }),
-    resend: new Resend(process.env.RESEND_API_KEY)
+    // Staging must be able to boot with sending disabled and without a provider key.
+    // The send route separately requires RESEND_API_KEY before any provider call.
+    resend: process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null
   };
 }
 
@@ -298,7 +300,7 @@ function createApp({ pool, resend }) {
 
   app.post("/send-batch/:id", async (req, res) => {
     if (process.env.SEND_ENABLED !== "true" || process.env.SENDER_DOMAIN_VERIFIED !== "true") return res.status(423).send("Envio bloqueado: confirme o domínio e habilite o envio somente após aprovação.");
-    const required = ["EMAIL_FROM", "EMAIL_REPLY_TO", "PUBLIC_APP_URL", "UNSUBSCRIBE_SECRET"];
+    const required = ["RESEND_API_KEY", "EMAIL_FROM", "EMAIL_REPLY_TO", "PUBLIC_APP_URL", "UNSUBSCRIBE_SECRET"];
     const missing = required.filter(name => !process.env[name]);
     if (missing.length) return res.status(503).send(`Configuração ausente: ${missing.join(", ")}`);
     const campaignResult = await pool.query(`SELECT * FROM campaigns WHERE id=$1`, [req.params.id]);
