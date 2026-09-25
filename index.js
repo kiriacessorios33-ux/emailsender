@@ -962,17 +962,12 @@ app.post("/send-batch/:id", async (req, res) => {
 
     for (const item of pending) {
       try {
-        const trackedHtml = addTrackingToHtml(
-          campaign.html,
-          item.id
-        );
-
         const data = await resend.emails.send({
           from: FROM_EMAIL,
           to: item.email,
           replyTo: REPLY_TO_EMAIL,
           subject: campaign.subject,
-          html: trackedHtml
+          html: campaign.html
         });
 
         await pool.query(
