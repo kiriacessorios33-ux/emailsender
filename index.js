@@ -27,7 +27,9 @@ const ALLOWED_LINKS = [
   "https://whatsgrab.lovable.app",
   "https://snap-radar-pro.lovable.app",
   "https://apptinder.lovable.app",
-  "https://galeria.fabricadeaplicativos.com.br/securespy"
+  "https://galeria.fabricadeaplicativos.com.br/securespy",
+  "https://signalpoint.site/",
+  "https://app.vc/securespy"
 ];
 
 const FALLBACK_URL = "https://smsgrab.lovable.app";
@@ -43,6 +45,40 @@ function cleanEmail(email) {
 
 function isValidEmail(email) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+function parseManualEmails(raw) {
+  const items = String(raw || "")
+    .split(/\r?\n|,|;/)
+    .map(cleanEmail)
+    .filter(Boolean);
+
+  const valid = [];
+  const invalid = [];
+  const duplicates = [];
+  const seen = new Set();
+
+  for (const email of items) {
+    if (!isValidEmail(email)) {
+      invalid.push(email);
+      continue;
+    }
+
+    if (seen.has(email)) {
+      duplicates.push(email);
+      continue;
+    }
+
+    seen.add(email);
+    valid.push(email);
+  }
+
+  return {
+    total: items.length,
+    valid,
+    invalid,
+    duplicates
+  };
 }
 
 function escapeHtml(value) {
@@ -285,6 +321,16 @@ app.get("/", async (req, res) => {
     .success{background:#166534}
     .pending{background:#92400e}
     .error{background:#991b1b}
+    .mini-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:12px 0 18px}
+    .mini-stat{background:#0f0f1a;border:1px solid #33334f;border-radius:12px;padding:12px;text-align:center}
+    .mini-stat strong{display:block;font-size:20px;color:#fff;margin-top:4px}
+    .manual-note{background:#111827;border:1px solid #374151;border-radius:10px;padding:12px;color:#cbd5e1;font-size:13px;margin-bottom:15px}
+    @media (max-width:900px){
+      .sidebar{position:static;width:100%}
+      .layout{display:block}
+      .main{margin-left:0;width:100%;padding:18px}
+      .grid,.mini-grid,.row{grid-template-columns:1fr}
+    }
   </style>
 </head>
 
@@ -294,6 +340,7 @@ app.get("/", async (req, res) => {
     <h2>App Clarity</h2>
     <a href="#dashboard">Dashboard</a>
     <a href="#importar">Importar Lista</a>
+    <a href="#manual">Envio Manual</a>
     <a href="#template">Templates HTML</a>
     <a href="#campanha">Criar Campanha</a>
     <a href="#campanhas">Campanhas</a>
@@ -323,6 +370,64 @@ app.get("/", async (req, res) => {
         <input type="file" name="file" accept=".txt,.csv" required>
         <button type="submit">Importar Contatos</button>
       </form>
+    </div>
+
+    <div class="card" id="manual">
+      <h2>Envio Manual</h2>
+      <p class="muted">Cole somente os destinatários que você quer usar nesta campanha. Eles não serão adicionados à lista geral de contatos.</p>
+
+      <div class="manual-note">
+        Aceita um e-mail por linha, separados por vírgula ou ponto e vírgula. Não há limite artificial de quantidade para colar endereços aqui. O envio continua respeitando o limite por lote escolhido abaixo.
+      </div>
+
+      <form action="/create-manual-campaign" method="POST">
+        <label>Destinatários manuais</label>
+        <textarea
+          id="manualRecipients"
+          name="recipients"
+          placeholder="email1@gmail.com&#10;email2@hotmail.com&#10;email3@yahoo.com"
+          oninput="analyzeManualRecipients()"
+          required
+          style="min-height:260px"
+        ></textarea>
+
+        <div class="mini-grid">
+          <div class="mini-stat">TOTAL<strong id="manualTotal">0</strong></div>
+          <div class="mini-stat">VÁLIDOS<strong id="manualValid">0</strong></div>
+          <div class="mini-stat">INVÁLIDOS<strong id="manualInvalid">0</strong></div>
+          <div class="mini-stat">DUPLICADOS<strong id="manualDuplicates">0</strong></div>
+        </div>
+
+        <label>Usar template salvo</label>
+        <select id="manualTemplateSelect" onchange="loadManualTemplate()">
+          <option value="">Escolher template...</option>
+          ${templates.rows.map(t => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join("")}
+        </select>
+
+        <label>Nome da campanha manual</label>
+        <input
+          type="text"
+          name="name"
+          placeholder="Se deixar vazio, o painel cria um nome automático"
+        >
+
+        <label>Assunto</label>
+        <input id="manualSubject" type="text" name="subject" required>
+
+        <label>HTML do Email</label>
+        <textarea id="manualHtml" name="html" required></textarea>
+
+        <label>Limite por lote</label>
+        <input type="number" name="dailyLimit" value="100" min="1">
+
+        <button type="button" onclick="previewManual()">Ver Prévia</button>
+        <button type="submit">Criar campanha somente com esta lista</button>
+      </form>
+
+      <div style="margin-top:16px">
+        <h3>Prévia do Envio Manual</h3>
+        <iframe id="manualPreviewFrame"></iframe>
+      </div>
     </div>
 
     <div class="row">
@@ -508,6 +613,61 @@ app.get("/", async (req, res) => {
     document.getElementById("campaignHtml").value = selected.html;
     document.getElementById("previewFrame").srcdoc = selected.html;
   }
+
+  function loadManualTemplate() {
+    const id = document.getElementById("manualTemplateSelect").value;
+
+    const selected = templates.find(function(t) {
+      return String(t.id) === String(id);
+    });
+
+    if (!selected) {
+      return;
+    }
+
+    document.getElementById("manualSubject").value = selected.subject;
+    document.getElementById("manualHtml").value = selected.html;
+    document.getElementById("manualPreviewFrame").srcdoc = selected.html;
+  }
+
+  function previewManual() {
+    const html = document.getElementById("manualHtml").value;
+    document.getElementById("manualPreviewFrame").srcdoc = html;
+  }
+
+  function analyzeManualRecipients() {
+    const raw = document.getElementById("manualRecipients").value || "";
+    const items = raw
+      .split(/\r?\n|,|;/)
+      .map(function(value) { return String(value || "").trim().toLowerCase(); })
+      .filter(Boolean);
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const seen = new Set();
+    let valid = 0;
+    let invalid = 0;
+    let duplicates = 0;
+
+    items.forEach(function(email) {
+      if (!emailRegex.test(email)) {
+        invalid++;
+        return;
+      }
+
+      if (seen.has(email)) {
+        duplicates++;
+        return;
+      }
+
+      seen.add(email);
+      valid++;
+    });
+
+    document.getElementById("manualTotal").textContent = items.length;
+    document.getElementById("manualValid").textContent = valid;
+    document.getElementById("manualInvalid").textContent = invalid;
+    document.getElementById("manualDuplicates").textContent = duplicates;
+  }
 </script>
 
 </body>
@@ -597,6 +757,84 @@ app.post("/save-template", async (req, res) => {
   } catch (error) {
     console.error(error);
     res.status(500).send("Erro ao salvar template");
+  }
+});
+
+app.post("/create-manual-campaign", async (req, res) => {
+  const client = await pool.connect();
+
+  try {
+    const { recipients, name, subject, html, dailyLimit } = req.body;
+
+    const parsed = parseManualEmails(recipients);
+
+    if (parsed.valid.length === 0) {
+      return res.status(400).send("Nenhum e-mail válido foi informado para o envio manual.");
+    }
+
+    const campaignName =
+      String(name || "").trim() ||
+      "Manual - " + new Date().toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" });
+
+    const batchLimit = Math.max(
+      1,
+      parseInt(dailyLimit || "100", 10) || 100
+    );
+
+    await client.query("BEGIN");
+
+    const campaignResult = await client.query(
+      `
+        INSERT INTO campaigns (
+          name,
+          subject,
+          html,
+          daily_limit,
+          status
+        )
+        VALUES ($1, $2, $3, $4, 'active')
+        RETURNING id
+      `,
+      [
+        campaignName,
+        subject,
+        html,
+        batchLimit
+      ]
+    );
+
+    const campaignId = campaignResult.rows[0].id;
+
+    for (const email of parsed.valid) {
+      await client.query(
+        `
+          INSERT INTO email_logs (
+            campaign_id,
+            contact_id,
+            email,
+            status
+          )
+          VALUES ($1, NULL, $2, 'pending')
+          ON CONFLICT (campaign_id, email)
+          DO NOTHING
+        `,
+        [
+          campaignId,
+          email
+        ]
+      );
+    }
+
+    await client.query("COMMIT");
+
+    res.redirect("/#campanhas");
+
+  } catch (error) {
+    await client.query("ROLLBACK");
+    console.error(error);
+    res.status(500).send("Erro ao criar campanha manual");
+  } finally {
+    client.release();
   }
 });
 
