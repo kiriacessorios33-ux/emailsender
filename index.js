@@ -35,7 +35,7 @@ const ALLOWED_LINKS = [
 const FALLBACK_URL = "https://smsgrab.lovable.app";
 
 const TRANSPARENT_PIXEL = Buffer.from(
-  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
   "base64"
 );
 
@@ -96,6 +96,13 @@ function isAllowedUrl(url) {
   });
 }
 
+/*
+  Mantemos estas funções/rotas antigas por compatibilidade
+  com e-mails já enviados anteriormente.
+
+  IMPORTANTE:
+  NOVOS ENVIOS NÃO USAM MAIS ESTE TRACKING DO RAILWAY.
+*/
 function addTrackingToHtml(html, logId) {
   let modifiedHtml = String(html || "");
 
@@ -125,7 +132,10 @@ function addTrackingToHtml(html, logId) {
     '.png" width="1" height="1" style="display:none;opacity:0;width:1px;height:1px;" alt="" />';
 
   if (/<\/body>/i.test(modifiedHtml)) {
-    modifiedHtml = modifiedHtml.replace(/<\/body>/i, pixel + "</body>");
+    modifiedHtml = modifiedHtml.replace(
+      /<\/body>/i,
+      pixel + "</body>"
+    );
   } else {
     modifiedHtml += pixel;
   }
@@ -242,6 +252,7 @@ app.get("/click/:id", async (req, res) => {
     );
 
     return res.redirect(originalUrl);
+
   } catch (error) {
     console.error("Click tracking error:", error);
     return res.redirect(FALLBACK_URL);
@@ -260,26 +271,37 @@ app.get("/open/:id.png", async (req, res) => {
       `,
       [logId]
     );
+
   } catch (error) {
     console.error("Open tracking error:", error);
   }
 
   res.set("Content-Type", "image/png");
-  res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+  res.set(
+    "Cache-Control",
+    "no-store, no-cache, must-revalidate, proxy-revalidate"
+  );
   res.set("Pragma", "no-cache");
   res.set("Expires", "0");
   res.send(TRANSPARENT_PIXEL);
 });
 app.get("/", async (req, res) => {
   try {
-    const contactsTotal = await pool.query(`SELECT COUNT(*) FROM contacts`);
-    const campaignsTotal = await pool.query(`SELECT COUNT(*) FROM campaigns`);
+    const contactsTotal = await pool.query(
+      `SELECT COUNT(*) FROM contacts`
+    );
+
+    const campaignsTotal = await pool.query(
+      `SELECT COUNT(*) FROM campaigns`
+    );
+
     const pendingTotal = await pool.query(
       `SELECT COUNT(*) FROM email_logs WHERE status = 'pending'`
     );
 
     const sentToday = await pool.query(`
-      SELECT COUNT(*) FROM email_logs
+      SELECT COUNT(*)
+      FROM email_logs
       WHERE status = 'sent'
       AND DATE(sent_at) = CURRENT_DATE
     `);
@@ -304,33 +326,47 @@ app.get("/", async (req, res) => {
       SELECT
         c.*,
         COUNT(l.id) AS total_queue,
-        COUNT(l.id) FILTER (WHERE l.status = 'pending') AS pending_count,
-        COUNT(l.id) FILTER (WHERE l.status = 'sent') AS sent_count,
-        COUNT(l.id) FILTER (WHERE l.status = 'error') AS error_count,
-        COUNT(l.id) FILTER (WHERE l.opened_at IS NOT NULL) AS open_count,
-        COUNT(l.id) FILTER (WHERE l.clicked_at IS NOT NULL) AS click_count
+        COUNT(l.id) FILTER (
+          WHERE l.status = 'pending'
+        ) AS pending_count,
+        COUNT(l.id) FILTER (
+          WHERE l.status = 'sent'
+        ) AS sent_count,
+        COUNT(l.id) FILTER (
+          WHERE l.status = 'error'
+        ) AS error_count,
+        COUNT(l.id) FILTER (
+          WHERE l.opened_at IS NOT NULL
+        ) AS open_count,
+        COUNT(l.id) FILTER (
+          WHERE l.clicked_at IS NOT NULL
+        ) AS click_count
       FROM campaigns c
-      LEFT JOIN email_logs l ON l.campaign_id = c.id
+      LEFT JOIN email_logs l
+        ON l.campaign_id = c.id
       GROUP BY c.id
       ORDER BY c.created_at DESC
       LIMIT 20
     `);
 
     const templates = await pool.query(`
-      SELECT * FROM templates
+      SELECT *
+      FROM templates
       ORDER BY created_at DESC
     `);
 
     const recentLogs = await pool.query(`
-      SELECT * FROM email_logs
+      SELECT *
+      FROM email_logs
       ORDER BY created_at DESC
       LIMIT 30
     `);
 
-    const templatesJson = JSON.stringify(templates.rows).replaceAll(
-      "<",
-      "\\u003c"
-    );
+    const templatesJson =
+      JSON.stringify(templates.rows).replaceAll(
+        "<",
+        "\\u003c"
+      );
 
     res.send(`
 <!DOCTYPE html>
@@ -339,217 +375,219 @@ app.get("/", async (req, res) => {
   <title>App Clarity Dashboard</title>
 
   <style>
-    *{box-sizing:border-box}
-
-    body{
-      margin:0;
-      background:#0b0b12;
-      color:#fff;
-      font-family:Arial,sans-serif;
+    * {
+      box-sizing: border-box;
     }
 
-    .layout{
-      display:flex;
-      min-height:100vh;
+    body {
+      margin: 0;
+      background: #0b0b12;
+      color: #fff;
+      font-family: Arial, sans-serif;
     }
 
-    .sidebar{
-      width:260px;
-      background:#11111d;
-      padding:25px;
-      border-right:1px solid #24243a;
-      position:fixed;
-      top:0;
-      bottom:0;
-      left:0;
+    .layout {
+      display: flex;
+      min-height: 100vh;
     }
 
-    .sidebar h2{
-      margin-top:0;
-      color:#a78bfa;
+    .sidebar {
+      width: 260px;
+      background: #11111d;
+      padding: 25px;
+      border-right: 1px solid #24243a;
+      position: fixed;
+      top: 0;
+      bottom: 0;
+      left: 0;
     }
 
-    .sidebar a{
-      display:block;
-      color:#ddd;
-      text-decoration:none;
-      padding:12px;
-      border-radius:10px;
-      margin-bottom:8px;
-      background:#181827;
+    .sidebar h2 {
+      margin-top: 0;
+      color: #a78bfa;
     }
 
-    .main{
-      margin-left:260px;
-      width:calc(100% - 260px);
-      padding:30px;
+    .sidebar a {
+      display: block;
+      color: #ddd;
+      text-decoration: none;
+      padding: 12px;
+      border-radius: 10px;
+      margin-bottom: 8px;
+      background: #181827;
     }
 
-    .grid{
-      display:grid;
-      grid-template-columns:repeat(4,1fr);
-      gap:15px;
-      margin-bottom:30px;
+    .main {
+      margin-left: 260px;
+      width: calc(100% - 260px);
+      padding: 30px;
     }
 
-    .card{
-      background:#161625;
-      border:1px solid #292945;
-      border-radius:16px;
-      padding:20px;
-      margin-bottom:20px;
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 15px;
+      margin-bottom: 30px;
     }
 
-    .stat{
-      font-size:28px;
-      font-weight:bold;
-      margin-bottom:5px;
+    .card {
+      background: #161625;
+      border: 1px solid #292945;
+      border-radius: 16px;
+      padding: 20px;
+      margin-bottom: 20px;
     }
 
-    .muted{
-      color:#aaa;
-      font-size:14px;
+    .stat {
+      font-size: 28px;
+      font-weight: bold;
+      margin-bottom: 5px;
+    }
+
+    .muted {
+      color: #aaa;
+      font-size: 14px;
     }
 
     input,
     textarea,
-    select{
-      width:100%;
-      padding:13px;
-      margin-top:8px;
-      margin-bottom:15px;
-      background:#0f0f1a;
-      border:1px solid #33334f;
-      color:white;
-      border-radius:10px;
-      font-size:14px;
+    select {
+      width: 100%;
+      padding: 13px;
+      margin-top: 8px;
+      margin-bottom: 15px;
+      background: #0f0f1a;
+      border: 1px solid #33334f;
+      color: white;
+      border-radius: 10px;
+      font-size: 14px;
     }
 
-    textarea{
-      min-height:180px;
-      font-family:monospace;
+    textarea {
+      min-height: 180px;
+      font-family: monospace;
     }
 
-    button{
-      background:#7c3aed;
-      color:white;
-      border:none;
-      padding:12px 18px;
-      border-radius:10px;
-      cursor:pointer;
-      font-size:14px;
-      font-weight:bold;
-      margin:2px;
+    button {
+      background: #7c3aed;
+      color: white;
+      border: none;
+      padding: 12px 18px;
+      border-radius: 10px;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: bold;
+      margin: 2px;
     }
 
-    button.secondary{
-      background:#292945;
+    button.secondary {
+      background: #292945;
     }
 
-    table{
-      width:100%;
-      border-collapse:collapse;
-      margin-top:15px;
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 15px;
     }
 
     th,
-    td{
-      padding:12px;
-      border-bottom:1px solid #292945;
-      text-align:left;
-      font-size:14px;
+    td {
+      padding: 12px;
+      border-bottom: 1px solid #292945;
+      text-align: left;
+      font-size: 14px;
     }
 
-    th{
-      color:#a78bfa;
+    th {
+      color: #a78bfa;
     }
 
-    .row{
-      display:grid;
-      grid-template-columns:1fr 1fr;
-      gap:20px;
+    .row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
     }
 
-    iframe{
-      width:100%;
-      height:380px;
-      background:white;
-      border:none;
-      border-radius:12px;
+    iframe {
+      width: 100%;
+      height: 380px;
+      background: white;
+      border: none;
+      border-radius: 12px;
     }
 
-    .badge{
-      padding:5px 9px;
-      border-radius:999px;
-      font-size:12px;
-      background:#33334f;
-      display:inline-block;
+    .badge {
+      padding: 5px 9px;
+      border-radius: 999px;
+      font-size: 12px;
+      background: #33334f;
+      display: inline-block;
     }
 
-    .success{
-      background:#166534;
+    .success {
+      background: #166534;
     }
 
-    .pending{
-      background:#92400e;
+    .pending {
+      background: #92400e;
     }
 
-    .error{
-      background:#991b1b;
+    .error {
+      background: #991b1b;
     }
 
-    .mini-grid{
-      display:grid;
-      grid-template-columns:repeat(4,1fr);
-      gap:10px;
-      margin:12px 0 18px;
+    .mini-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 10px;
+      margin: 12px 0 18px;
     }
 
-    .mini-stat{
-      background:#0f0f1a;
-      border:1px solid #33334f;
-      border-radius:12px;
-      padding:12px;
-      text-align:center;
+    .mini-stat {
+      background: #0f0f1a;
+      border: 1px solid #33334f;
+      border-radius: 12px;
+      padding: 12px;
+      text-align: center;
     }
 
-    .mini-stat strong{
-      display:block;
-      font-size:20px;
-      color:#fff;
-      margin-top:4px;
+    .mini-stat strong {
+      display: block;
+      font-size: 20px;
+      color: #fff;
+      margin-top: 4px;
     }
 
-    .manual-note{
-      background:#111827;
-      border:1px solid #374151;
-      border-radius:10px;
-      padding:12px;
-      color:#cbd5e1;
-      font-size:13px;
-      margin-bottom:15px;
+    .manual-note {
+      background: #111827;
+      border: 1px solid #374151;
+      border-radius: 10px;
+      padding: 12px;
+      color: #cbd5e1;
+      font-size: 13px;
+      margin-bottom: 15px;
     }
 
-    @media (max-width:900px){
-      .sidebar{
-        position:static;
-        width:100%;
+    @media (max-width: 900px) {
+      .sidebar {
+        position: static;
+        width: 100%;
       }
 
-      .layout{
-        display:block;
+      .layout {
+        display: block;
       }
 
-      .main{
-        margin-left:0;
-        width:100%;
-        padding:18px;
+      .main {
+        margin-left: 0;
+        width: 100%;
+        padding: 18px;
       }
 
       .grid,
       .mini-grid,
-      .row{
-        grid-template-columns:1fr;
+      .row {
+        grid-template-columns: 1fr;
       }
     }
   </style>
@@ -573,7 +611,9 @@ app.get("/", async (req, res) => {
 
   <div class="main">
 
-    <h1 id="dashboard">Dashboard</h1>
+    <h1 id="dashboard">
+      Dashboard
+    </h1>
 
     <p class="muted">
       Painel profissional da sua plataforma de email marketing.
@@ -665,11 +705,14 @@ app.get("/", async (req, res) => {
 
     <div class="card" id="importar">
 
-      <h2>Importar Lista de Emails</h2>
+      <h2>
+        Importar Lista de Emails
+      </h2>
 
       <p class="muted">
-        Suba seus contatos uma vez. Depois você pode importar novos emails
-        todos os dias. O sistema ignora duplicados.
+        Suba seus contatos uma vez.
+        Depois você pode importar novos emails todos os dias.
+        O sistema ignora duplicados.
       </p>
 
       <form
@@ -699,7 +742,9 @@ app.get("/", async (req, res) => {
 
     <div class="card" id="manual">
 
-      <h2>Envio Manual</h2>
+      <h2>
+        Envio Manual
+      </h2>
 
       <p class="muted">
         Cole somente os destinatários que você quer usar nesta campanha.
@@ -770,7 +815,6 @@ app.get("/", async (req, res) => {
           id="manualTemplateSelect"
           onchange="loadManualTemplate()"
         >
-
           <option value="">
             Escolher template...
           </option>
@@ -781,7 +825,6 @@ app.get("/", async (req, res) => {
                 `<option value="${t.id}">${escapeHtml(t.name)}</option>`
             )
             .join("")}
-
         </select>
 
         <label>
@@ -856,9 +899,14 @@ app.get("/", async (req, res) => {
 
       <div class="card" id="template">
 
-        <h2>Salvar Template HTML</h2>
+        <h2>
+          Salvar Template HTML
+        </h2>
 
-        <form action="/save-template" method="POST">
+        <form
+          action="/save-template"
+          method="POST"
+        >
 
           <label>
             Nome do Template
@@ -1208,9 +1256,10 @@ app.get("/", async (req, res) => {
     const id =
       document.getElementById("templateSelect").value;
 
-    const selected = templates.find(function(t) {
-      return String(t.id) === String(id);
-    });
+    const selected =
+      templates.find(function(t) {
+        return String(t.id) === String(id);
+      });
 
     if (!selected) {
       document.getElementById("campaignSubject").value = "";
@@ -1233,9 +1282,10 @@ app.get("/", async (req, res) => {
     const id =
       document.getElementById("manualTemplateSelect").value;
 
-    const selected = templates.find(function(t) {
-      return String(t.id) === String(id);
-    });
+    const selected =
+      templates.find(function(t) {
+        return String(t.id) === String(id);
+      });
 
     if (!selected) {
       document.getElementById("manualSubject").value = "";
@@ -1320,9 +1370,9 @@ app.get("/", async (req, res) => {
   } catch (error) {
     console.error("Dashboard error:", error);
 
-    res.status(500).send(
-      "Erro ao carregar dashboard"
-    );
+    res
+      .status(500)
+      .send("Erro ao carregar dashboard");
   }
 });
 
@@ -1353,15 +1403,16 @@ app.post(
       let duplicated = 0;
 
       for (const email of uniqueEmails) {
-        const result = await pool.query(
-          `
-          INSERT INTO contacts (email)
-          VALUES ($1)
-          ON CONFLICT (email) DO NOTHING
-          RETURNING id
-          `,
-          [email]
-        );
+        const result =
+          await pool.query(
+            `
+            INSERT INTO contacts (email)
+            VALUES ($1)
+            ON CONFLICT (email) DO NOTHING
+            RETURNING id
+            `,
+            [email]
+          );
 
         if (result.rows.length > 0) {
           inserted++;
@@ -1922,12 +1973,13 @@ app.post("/send-batch/:id", async (req, res) => {
           );
         }
 
-        const trackedHtml =
-          addTrackingToHtml(
-            campaign.html,
-            item.id
-          );
+        /*
+          IMPORTANTE:
+          NOVOS ENVIOS NÃO PASSAM MAIS
+          PELO TRACKING DO RAILWAY.
 
+          O HTML vai direto para a Resend.
+        */
         const {
           data,
           error
@@ -1940,7 +1992,7 @@ app.post("/send-batch/:id", async (req, res) => {
             subject:
               campaign.subject,
             html:
-              trackedHtml
+              campaign.html
           });
 
         if (error) {
