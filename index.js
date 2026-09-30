@@ -99,20 +99,23 @@ function isAllowedUrl(url) {
 function addTrackingToHtml(html, logId) {
   let modifiedHtml = String(html || "");
 
-  modifiedHtml = modifiedHtml.replace(/href=(["'])(.*?)\1/gi, function(match, quote, originalUrl) {
-    if (!isAllowedUrl(originalUrl)) {
-      return match;
+  modifiedHtml = modifiedHtml.replace(
+    /href=(["'])(.*?)\1/gi,
+    function(match, quote, originalUrl) {
+      if (!isAllowedUrl(originalUrl)) {
+        return match;
+      }
+
+      const trackingUrl =
+        APP_URL +
+        "/click/" +
+        encodeURIComponent(logId) +
+        "?url=" +
+        encodeURIComponent(originalUrl);
+
+      return "href=" + quote + trackingUrl + quote;
     }
-
-    const trackingUrl =
-      APP_URL +
-      "/click/" +
-      encodeURIComponent(logId) +
-      "?url=" +
-      encodeURIComponent(originalUrl);
-
-    return "href=" + quote + trackingUrl + quote;
-  });
+  );
 
   const pixel =
     '<img src="' +
@@ -179,14 +182,37 @@ async function initDatabase() {
     );
   `);
 
-  await pool.query(`ALTER TABLE contacts ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'active';`);
-  await pool.query(`ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS daily_limit INTEGER DEFAULT 30;`);
-  await pool.query(`ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'active';`);
-  await pool.query(`ALTER TABLE email_logs ADD COLUMN IF NOT EXISTS contact_id INTEGER;`);
-  await pool.query(`ALTER TABLE email_logs ADD COLUMN IF NOT EXISTS sent_at TIMESTAMP;`);
-  await pool.query(`ALTER TABLE email_logs ADD COLUMN IF NOT EXISTS delivered_at TIMESTAMP;`);
-  await pool.query(`ALTER TABLE email_logs ADD COLUMN IF NOT EXISTS opened_at TIMESTAMP;`);
-  await pool.query(`ALTER TABLE email_logs ADD COLUMN IF NOT EXISTS clicked_at TIMESTAMP;`);
+  await pool.query(
+    `ALTER TABLE contacts ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'active';`
+  );
+
+  await pool.query(
+    `ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS daily_limit INTEGER DEFAULT 30;`
+  );
+
+  await pool.query(
+    `ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'active';`
+  );
+
+  await pool.query(
+    `ALTER TABLE email_logs ADD COLUMN IF NOT EXISTS contact_id INTEGER;`
+  );
+
+  await pool.query(
+    `ALTER TABLE email_logs ADD COLUMN IF NOT EXISTS sent_at TIMESTAMP;`
+  );
+
+  await pool.query(
+    `ALTER TABLE email_logs ADD COLUMN IF NOT EXISTS delivered_at TIMESTAMP;`
+  );
+
+  await pool.query(
+    `ALTER TABLE email_logs ADD COLUMN IF NOT EXISTS opened_at TIMESTAMP;`
+  );
+
+  await pool.query(
+    `ALTER TABLE email_logs ADD COLUMN IF NOT EXISTS clicked_at TIMESTAMP;`
+  );
 
   await pool.query(`
     CREATE UNIQUE INDEX IF NOT EXISTS email_logs_campaign_email_unique
@@ -244,12 +270,13 @@ app.get("/open/:id.png", async (req, res) => {
   res.set("Expires", "0");
   res.send(TRANSPARENT_PIXEL);
 });
-
 app.get("/", async (req, res) => {
   try {
     const contactsTotal = await pool.query(`SELECT COUNT(*) FROM contacts`);
     const campaignsTotal = await pool.query(`SELECT COUNT(*) FROM campaigns`);
-    const pendingTotal = await pool.query(`SELECT COUNT(*) FROM email_logs WHERE status = 'pending'`);
+    const pendingTotal = await pool.query(
+      `SELECT COUNT(*) FROM email_logs WHERE status = 'pending'`
+    );
 
     const sentToday = await pool.query(`
       SELECT COUNT(*) FROM email_logs
@@ -257,10 +284,21 @@ app.get("/", async (req, res) => {
       AND DATE(sent_at) = CURRENT_DATE
     `);
 
-    const sentTotal = await pool.query(`SELECT COUNT(*) FROM email_logs WHERE status = 'sent'`);
-    const errorsTotal = await pool.query(`SELECT COUNT(*) FROM email_logs WHERE status = 'error'`);
-    const openedTotal = await pool.query(`SELECT COUNT(*) FROM email_logs WHERE opened_at IS NOT NULL`);
-    const clickedTotal = await pool.query(`SELECT COUNT(*) FROM email_logs WHERE clicked_at IS NOT NULL`);
+    const sentTotal = await pool.query(
+      `SELECT COUNT(*) FROM email_logs WHERE status = 'sent'`
+    );
+
+    const errorsTotal = await pool.query(
+      `SELECT COUNT(*) FROM email_logs WHERE status = 'error'`
+    );
+
+    const openedTotal = await pool.query(
+      `SELECT COUNT(*) FROM email_logs WHERE opened_at IS NOT NULL`
+    );
+
+    const clickedTotal = await pool.query(
+      `SELECT COUNT(*) FROM email_logs WHERE clicked_at IS NOT NULL`
+    );
 
     const campaigns = await pool.query(`
       SELECT
@@ -289,55 +327,241 @@ app.get("/", async (req, res) => {
       LIMIT 30
     `);
 
-    const templatesJson = JSON.stringify(templates.rows).replaceAll("<", "\\u003c");
+    const templatesJson = JSON.stringify(templates.rows).replaceAll(
+      "<",
+      "\\u003c"
+    );
 
     res.send(`
 <!DOCTYPE html>
 <html>
 <head>
   <title>App Clarity Dashboard</title>
+
   <style>
     *{box-sizing:border-box}
-    body{margin:0;background:#0b0b12;color:#fff;font-family:Arial,sans-serif}
-    .layout{display:flex;min-height:100vh}
-    .sidebar{width:260px;background:#11111d;padding:25px;border-right:1px solid #24243a;position:fixed;top:0;bottom:0;left:0}
-    .sidebar h2{margin-top:0;color:#a78bfa}
-    .sidebar a{display:block;color:#ddd;text-decoration:none;padding:12px;border-radius:10px;margin-bottom:8px;background:#181827}
-    .main{margin-left:260px;width:calc(100% - 260px);padding:30px}
-    .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:15px;margin-bottom:30px}
-    .card{background:#161625;border:1px solid #292945;border-radius:16px;padding:20px;margin-bottom:20px}
-    .stat{font-size:28px;font-weight:bold;margin-bottom:5px}
-    .muted{color:#aaa;font-size:14px}
-    input,textarea,select{width:100%;padding:13px;margin-top:8px;margin-bottom:15px;background:#0f0f1a;border:1px solid #33334f;color:white;border-radius:10px;font-size:14px}
-    textarea{min-height:180px;font-family:monospace}
-    button{background:#7c3aed;color:white;border:none;padding:12px 18px;border-radius:10px;cursor:pointer;font-size:14px;font-weight:bold;margin:2px}
-    button.secondary{background:#292945}
-    table{width:100%;border-collapse:collapse;margin-top:15px}
-    th,td{padding:12px;border-bottom:1px solid #292945;text-align:left;font-size:14px}
-    th{color:#a78bfa}
-    .row{display:grid;grid-template-columns:1fr 1fr;gap:20px}
-    iframe{width:100%;height:380px;background:white;border:none;border-radius:12px}
-    .badge{padding:5px 9px;border-radius:999px;font-size:12px;background:#33334f;display:inline-block}
-    .success{background:#166534}
-    .pending{background:#92400e}
-    .error{background:#991b1b}
-    .mini-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:12px 0 18px}
-    .mini-stat{background:#0f0f1a;border:1px solid #33334f;border-radius:12px;padding:12px;text-align:center}
-    .mini-stat strong{display:block;font-size:20px;color:#fff;margin-top:4px}
-    .manual-note{background:#111827;border:1px solid #374151;border-radius:10px;padding:12px;color:#cbd5e1;font-size:13px;margin-bottom:15px}
+
+    body{
+      margin:0;
+      background:#0b0b12;
+      color:#fff;
+      font-family:Arial,sans-serif;
+    }
+
+    .layout{
+      display:flex;
+      min-height:100vh;
+    }
+
+    .sidebar{
+      width:260px;
+      background:#11111d;
+      padding:25px;
+      border-right:1px solid #24243a;
+      position:fixed;
+      top:0;
+      bottom:0;
+      left:0;
+    }
+
+    .sidebar h2{
+      margin-top:0;
+      color:#a78bfa;
+    }
+
+    .sidebar a{
+      display:block;
+      color:#ddd;
+      text-decoration:none;
+      padding:12px;
+      border-radius:10px;
+      margin-bottom:8px;
+      background:#181827;
+    }
+
+    .main{
+      margin-left:260px;
+      width:calc(100% - 260px);
+      padding:30px;
+    }
+
+    .grid{
+      display:grid;
+      grid-template-columns:repeat(4,1fr);
+      gap:15px;
+      margin-bottom:30px;
+    }
+
+    .card{
+      background:#161625;
+      border:1px solid #292945;
+      border-radius:16px;
+      padding:20px;
+      margin-bottom:20px;
+    }
+
+    .stat{
+      font-size:28px;
+      font-weight:bold;
+      margin-bottom:5px;
+    }
+
+    .muted{
+      color:#aaa;
+      font-size:14px;
+    }
+
+    input,
+    textarea,
+    select{
+      width:100%;
+      padding:13px;
+      margin-top:8px;
+      margin-bottom:15px;
+      background:#0f0f1a;
+      border:1px solid #33334f;
+      color:white;
+      border-radius:10px;
+      font-size:14px;
+    }
+
+    textarea{
+      min-height:180px;
+      font-family:monospace;
+    }
+
+    button{
+      background:#7c3aed;
+      color:white;
+      border:none;
+      padding:12px 18px;
+      border-radius:10px;
+      cursor:pointer;
+      font-size:14px;
+      font-weight:bold;
+      margin:2px;
+    }
+
+    button.secondary{
+      background:#292945;
+    }
+
+    table{
+      width:100%;
+      border-collapse:collapse;
+      margin-top:15px;
+    }
+
+    th,
+    td{
+      padding:12px;
+      border-bottom:1px solid #292945;
+      text-align:left;
+      font-size:14px;
+    }
+
+    th{
+      color:#a78bfa;
+    }
+
+    .row{
+      display:grid;
+      grid-template-columns:1fr 1fr;
+      gap:20px;
+    }
+
+    iframe{
+      width:100%;
+      height:380px;
+      background:white;
+      border:none;
+      border-radius:12px;
+    }
+
+    .badge{
+      padding:5px 9px;
+      border-radius:999px;
+      font-size:12px;
+      background:#33334f;
+      display:inline-block;
+    }
+
+    .success{
+      background:#166534;
+    }
+
+    .pending{
+      background:#92400e;
+    }
+
+    .error{
+      background:#991b1b;
+    }
+
+    .mini-grid{
+      display:grid;
+      grid-template-columns:repeat(4,1fr);
+      gap:10px;
+      margin:12px 0 18px;
+    }
+
+    .mini-stat{
+      background:#0f0f1a;
+      border:1px solid #33334f;
+      border-radius:12px;
+      padding:12px;
+      text-align:center;
+    }
+
+    .mini-stat strong{
+      display:block;
+      font-size:20px;
+      color:#fff;
+      margin-top:4px;
+    }
+
+    .manual-note{
+      background:#111827;
+      border:1px solid #374151;
+      border-radius:10px;
+      padding:12px;
+      color:#cbd5e1;
+      font-size:13px;
+      margin-bottom:15px;
+    }
+
     @media (max-width:900px){
-      .sidebar{position:static;width:100%}
-      .layout{display:block}
-      .main{margin-left:0;width:100%;padding:18px}
-      .grid,.mini-grid,.row{grid-template-columns:1fr}
+      .sidebar{
+        position:static;
+        width:100%;
+      }
+
+      .layout{
+        display:block;
+      }
+
+      .main{
+        margin-left:0;
+        width:100%;
+        padding:18px;
+      }
+
+      .grid,
+      .mini-grid,
+      .row{
+        grid-template-columns:1fr;
+      }
     }
   </style>
 </head>
 
 <body>
+
 <div class="layout">
+
   <div class="sidebar">
     <h2>App Clarity</h2>
+
     <a href="#dashboard">Dashboard</a>
     <a href="#importar">Importar Lista</a>
     <a href="#manual">Envio Manual</a>
@@ -348,40 +572,155 @@ app.get("/", async (req, res) => {
   </div>
 
   <div class="main">
+
     <h1 id="dashboard">Dashboard</h1>
-    <p class="muted">Painel profissional da sua plataforma de email marketing.</p>
+
+    <p class="muted">
+      Painel profissional da sua plataforma de email marketing.
+    </p>
 
     <div class="grid">
-      <div class="card"><div class="stat">${contactsTotal.rows[0].count}</div><div class="muted">Contatos salvos</div></div>
-      <div class="card"><div class="stat">${campaignsTotal.rows[0].count}</div><div class="muted">Campanhas</div></div>
-      <div class="card"><div class="stat">${pendingTotal.rows[0].count}</div><div class="muted">Pendentes</div></div>
-      <div class="card"><div class="stat">${sentToday.rows[0].count}</div><div class="muted">Enviados hoje</div></div>
-      <div class="card"><div class="stat">${sentTotal.rows[0].count}</div><div class="muted">Total enviados</div></div>
-      <div class="card"><div class="stat">${errorsTotal.rows[0].count}</div><div class="muted">Erros</div></div>
-      <div class="card"><div class="stat">${openedTotal.rows[0].count}</div><div class="muted">Aberturas</div></div>
-      <div class="card"><div class="stat">${clickedTotal.rows[0].count}</div><div class="muted">Cliques</div></div>
+
+      <div class="card">
+        <div class="stat">
+          ${contactsTotal.rows[0].count}
+        </div>
+
+        <div class="muted">
+          Contatos salvos
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="stat">
+          ${campaignsTotal.rows[0].count}
+        </div>
+
+        <div class="muted">
+          Campanhas
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="stat">
+          ${pendingTotal.rows[0].count}
+        </div>
+
+        <div class="muted">
+          Pendentes
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="stat">
+          ${sentToday.rows[0].count}
+        </div>
+
+        <div class="muted">
+          Enviados hoje
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="stat">
+          ${sentTotal.rows[0].count}
+        </div>
+
+        <div class="muted">
+          Total enviados
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="stat">
+          ${errorsTotal.rows[0].count}
+        </div>
+
+        <div class="muted">
+          Erros
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="stat">
+          ${openedTotal.rows[0].count}
+        </div>
+
+        <div class="muted">
+          Aberturas
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="stat">
+          ${clickedTotal.rows[0].count}
+        </div>
+
+        <div class="muted">
+          Cliques
+        </div>
+      </div>
+
     </div>
 
     <div class="card" id="importar">
+
       <h2>Importar Lista de Emails</h2>
-      <p class="muted">Suba seus contatos uma vez. Depois você pode importar novos emails todos os dias. O sistema ignora duplicados.</p>
-      <form action="/import-contacts" method="POST" enctype="multipart/form-data">
-        <label>Arquivo TXT ou CSV</label>
-        <input type="file" name="file" accept=".txt,.csv" required>
-        <button type="submit">Importar Contatos</button>
+
+      <p class="muted">
+        Suba seus contatos uma vez. Depois você pode importar novos emails
+        todos os dias. O sistema ignora duplicados.
+      </p>
+
+      <form
+        action="/import-contacts"
+        method="POST"
+        enctype="multipart/form-data"
+      >
+
+        <label>
+          Arquivo TXT ou CSV
+        </label>
+
+        <input
+          type="file"
+          name="file"
+          accept=".txt,.csv"
+          required
+        >
+
+        <button type="submit">
+          Importar Contatos
+        </button>
+
       </form>
+
     </div>
 
     <div class="card" id="manual">
+
       <h2>Envio Manual</h2>
-      <p class="muted">Cole somente os destinatários que você quer usar nesta campanha. Eles não serão adicionados à lista geral de contatos.</p>
+
+      <p class="muted">
+        Cole somente os destinatários que você quer usar nesta campanha.
+        Eles não serão adicionados à lista geral de contatos.
+      </p>
 
       <div class="manual-note">
-        Aceita um e-mail por linha, separados por vírgula ou ponto e vírgula. Não há limite artificial de quantidade para colar endereços aqui. O envio continua respeitando o limite por lote escolhido abaixo.
+        Aceita um e-mail por linha, separados por vírgula ou ponto e vírgula.
+        Não há limite artificial de quantidade para colar endereços aqui.
+        O envio continua respeitando o limite por lote escolhido abaixo.
       </div>
 
-      <form action="/create-manual-campaign" method="POST">
-        <label>Destinatários manuais</label>
+      <form
+        action="/create-manual-campaign"
+        method="POST"
+      >
+
+        <label>
+          Destinatários manuais
+        </label>
+
         <textarea
           id="manualRecipients"
           name="recipients"
@@ -392,99 +731,301 @@ app.get("/", async (req, res) => {
         ></textarea>
 
         <div class="mini-grid">
-          <div class="mini-stat">TOTAL<strong id="manualTotal">0</strong></div>
-          <div class="mini-stat">VÁLIDOS<strong id="manualValid">0</strong></div>
-          <div class="mini-stat">INVÁLIDOS<strong id="manualInvalid">0</strong></div>
-          <div class="mini-stat">DUPLICADOS<strong id="manualDuplicates">0</strong></div>
+
+          <div class="mini-stat">
+            TOTAL
+            <strong id="manualTotal">
+              0
+            </strong>
+          </div>
+
+          <div class="mini-stat">
+            VÁLIDOS
+            <strong id="manualValid">
+              0
+            </strong>
+          </div>
+
+          <div class="mini-stat">
+            INVÁLIDOS
+            <strong id="manualInvalid">
+              0
+            </strong>
+          </div>
+
+          <div class="mini-stat">
+            DUPLICADOS
+            <strong id="manualDuplicates">
+              0
+            </strong>
+          </div>
+
         </div>
 
-        <label>Usar template salvo</label>
-        <select id="manualTemplateSelect" onchange="loadManualTemplate()">
-          <option value="">Escolher template...</option>
-          ${templates.rows.map(t => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join("")}
+        <label>
+          Usar template salvo
+        </label>
+
+        <select
+          id="manualTemplateSelect"
+          onchange="loadManualTemplate()"
+        >
+
+          <option value="">
+            Escolher template...
+          </option>
+
+          ${templates.rows
+            .map(
+              t =>
+                `<option value="${t.id}">${escapeHtml(t.name)}</option>`
+            )
+            .join("")}
+
         </select>
 
-        <label>Nome da campanha manual</label>
+        <label>
+          Nome da campanha manual
+        </label>
+
         <input
           type="text"
           name="name"
           placeholder="Se deixar vazio, o painel cria um nome automático"
         >
 
-        <label>Assunto</label>
-        <input id="manualSubject" type="text" name="subject" required>
+        <label>
+          Assunto
+        </label>
 
-        <label>HTML do Email</label>
-        <textarea id="manualHtml" name="html" required></textarea>
+        <input
+          id="manualSubject"
+          type="text"
+          name="subject"
+          required
+        >
 
-        <label>Limite por lote</label>
-        <input type="number" name="dailyLimit" value="100" min="1">
+        <label>
+          HTML do Email
+        </label>
 
-        <button type="button" onclick="previewManual()">Ver Prévia</button>
-        <button type="submit">Criar campanha somente com esta lista</button>
+        <textarea
+          id="manualHtml"
+          name="html"
+          required
+        ></textarea>
+
+        <label>
+          Limite por lote
+        </label>
+
+        <input
+          type="number"
+          name="dailyLimit"
+          value="100"
+          min="1"
+        >
+
+        <button
+          type="button"
+          onclick="previewManual()"
+        >
+          Ver Prévia
+        </button>
+
+        <button type="submit">
+          Criar campanha somente com esta lista
+        </button>
+
       </form>
 
       <div style="margin-top:16px">
-        <h3>Prévia do Envio Manual</h3>
-        <iframe id="manualPreviewFrame"></iframe>
+
+        <h3>
+          Prévia do Envio Manual
+        </h3>
+
+        <iframe
+          id="manualPreviewFrame"
+        ></iframe>
+
       </div>
+
     </div>
+        <div class="row">
 
-    <div class="row">
       <div class="card" id="template">
+
         <h2>Salvar Template HTML</h2>
+
         <form action="/save-template" method="POST">
-          <label>Nome do Template</label>
-          <input type="text" name="name" placeholder="Ex: Oferta Principal" required>
 
-          <label>Assunto padrão</label>
-          <input type="text" name="subject" placeholder="Ex: Oferta especial" required>
+          <label>
+            Nome do Template
+          </label>
 
-          <label>HTML do Email</label>
-          <textarea id="templateHtml" name="html" placeholder="<h1>Sua oferta</h1>" required></textarea>
+          <input
+            type="text"
+            name="name"
+            placeholder="Ex: Oferta Principal"
+            required
+          >
 
-          <button type="button" onclick="previewTemplate()">Ver Prévia</button>
-          <button type="submit">Salvar Template</button>
+          <label>
+            Assunto padrão
+          </label>
+
+          <input
+            type="text"
+            name="subject"
+            placeholder="Ex: Oferta especial"
+            required
+          >
+
+          <label>
+            HTML do Email
+          </label>
+
+          <textarea
+            id="templateHtml"
+            name="html"
+            placeholder="<h1>Sua oferta</h1>"
+            required
+          ></textarea>
+
+          <button
+            type="button"
+            onclick="previewTemplate()"
+          >
+            Ver Prévia
+          </button>
+
+          <button type="submit">
+            Salvar Template
+          </button>
+
         </form>
+
       </div>
 
       <div class="card">
-        <h2>Prévia do Email</h2>
-        <iframe id="previewFrame"></iframe>
+
+        <h2>
+          Prévia do Email
+        </h2>
+
+        <iframe
+          id="previewFrame"
+        ></iframe>
+
       </div>
+
     </div>
 
     <div class="card" id="campanha">
-      <h2>Criar Campanha</h2>
-      <p class="muted">A campanha cria uma fila com os contatos ativos. Depois você envia por lote.</p>
 
-      <form action="/create-campaign" method="POST">
-        <label>Usar template salvo</label>
-        <select id="templateSelect" onchange="loadTemplate()">
-          <option value="">Escolher template...</option>
-          ${templates.rows.map(t => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join("")}
+      <h2>
+        Criar Campanha
+      </h2>
+
+      <p class="muted">
+        A campanha cria uma fila com os contatos ativos.
+        Depois você envia por lote.
+      </p>
+
+      <form
+        action="/create-campaign"
+        method="POST"
+      >
+
+        <label>
+          Usar template salvo
+        </label>
+
+        <select
+          id="templateSelect"
+          onchange="loadTemplate()"
+        >
+
+          <option value="">
+            Escolher template...
+          </option>
+
+          ${templates.rows
+            .map(
+              t =>
+                `<option value="${t.id}">${escapeHtml(t.name)}</option>`
+            )
+            .join("")}
+
         </select>
 
-        <label>Nome da Campanha</label>
-        <input type="text" name="name" placeholder="Ex: Campanha Maio" required>
+        <label>
+          Nome da Campanha
+        </label>
 
-        <label>Assunto</label>
-        <input id="campaignSubject" type="text" name="subject" required>
+        <input
+          type="text"
+          name="name"
+          placeholder="Ex: Campanha Maio"
+          required
+        >
 
-        <label>HTML do Email</label>
-        <textarea id="campaignHtml" name="html" required></textarea>
+        <label>
+          Assunto
+        </label>
 
-        <label>Limite por lote</label>
-        <input type="number" name="dailyLimit" value="30" min="1">
+        <input
+          id="campaignSubject"
+          type="text"
+          name="subject"
+          required
+        >
 
-        <button type="button" onclick="previewCampaign()">Ver Prévia</button>
-        <button type="submit">Criar Campanha e Fila</button>
+        <label>
+          HTML do Email
+        </label>
+
+        <textarea
+          id="campaignHtml"
+          name="html"
+          required
+        ></textarea>
+
+        <label>
+          Limite por lote
+        </label>
+
+        <input
+          type="number"
+          name="dailyLimit"
+          value="30"
+          min="1"
+        >
+
+        <button
+          type="button"
+          onclick="previewCampaign()"
+        >
+          Ver Prévia
+        </button>
+
+        <button type="submit">
+          Criar Campanha e Fila
+        </button>
+
       </form>
+
     </div>
-        <div class="card" id="campanhas">
-      <h2>Campanhas</h2>
+
+    <div class="card" id="campanhas">
+
+      <h2>
+        Campanhas
+      </h2>
 
       <table>
+
         <tr>
           <th>Campanha</th>
           <th>Status</th>
@@ -497,9 +1038,14 @@ app.get("/", async (req, res) => {
           <th>Ação</th>
         </tr>
 
-        ${campaigns.rows.map(c => `
+        ${campaigns.rows
+          .map(
+            c => `
           <tr>
-            <td>${escapeHtml(c.name)}</td>
+
+            <td>
+              ${escapeHtml(c.name)}
+            </td>
 
             <td>
               <span class="badge">
@@ -507,36 +1053,74 @@ app.get("/", async (req, res) => {
               </span>
             </td>
 
-            <td>${c.total_queue}</td>
-            <td>${c.pending_count}</td>
-            <td>${c.sent_count}</td>
-            <td>${c.error_count}</td>
-            <td>${c.open_count}</td>
-            <td>${c.click_count}</td>
+            <td>
+              ${c.total_queue}
+            </td>
 
             <td>
-              <form action="/send-batch/${c.id}" method="POST" style="display:inline;">
+              ${c.pending_count}
+            </td>
+
+            <td>
+              ${c.sent_count}
+            </td>
+
+            <td>
+              ${c.error_count}
+            </td>
+
+            <td>
+              ${c.open_count}
+            </td>
+
+            <td>
+              ${c.click_count}
+            </td>
+
+            <td>
+
+              <form
+                action="/send-batch/${c.id}"
+                method="POST"
+                style="display:inline;"
+              >
                 <button type="submit">
                   Enviar lote
                 </button>
               </form>
 
-              <form action="/add-new-to-campaign/${c.id}" method="POST" style="display:inline;">
-                <button class="secondary" type="submit">
+              <form
+                action="/add-new-to-campaign/${c.id}"
+                method="POST"
+                style="display:inline;"
+              >
+                <button
+                  class="secondary"
+                  type="submit"
+                >
                   Add novos
                 </button>
               </form>
+
             </td>
+
           </tr>
-        `).join("")}
+        `
+          )
+          .join("")}
 
       </table>
+
     </div>
 
     <div class="card" id="logs">
-      <h2>Últimos Envios</h2>
+
+      <h2>
+        Últimos Envios
+      </h2>
 
       <table>
+
         <tr>
           <th>Email</th>
           <th>Status</th>
@@ -546,24 +1130,38 @@ app.get("/", async (req, res) => {
           <th>Data</th>
         </tr>
 
-        ${recentLogs.rows.map(log => `
+        ${recentLogs.rows
+          .map(
+            log => `
           <tr>
-            <td>${escapeHtml(log.email)}</td>
 
             <td>
-              <span class="badge ${
-                log.status === "sent"
-                  ? "success"
-                  : log.status === "pending"
-                  ? "pending"
-                  : "error"
-              }">
-                ${escapeHtml(log.status)}
-              </span>
+              ${escapeHtml(log.email)}
             </td>
 
-            <td>${log.opened_at ? "Sim" : "Não"}</td>
-            <td>${log.clicked_at ? "Sim" : "Não"}</td>
+            <td>
+
+              <span
+                class="badge ${
+                  log.status === "sent"
+                    ? "success"
+                    : log.status === "pending"
+                    ? "pending"
+                    : "error"
+                }"
+              >
+                ${escapeHtml(log.status)}
+              </span>
+
+            </td>
+
+            <td>
+              ${log.opened_at ? "Sim" : "Não"}
+            </td>
+
+            <td>
+              ${log.clicked_at ? "Sim" : "Não"}
+            </td>
 
             <td>
               ${escapeHtml(log.error_message || "")}
@@ -576,10 +1174,14 @@ app.get("/", async (req, res) => {
                   : ""
               }
             </td>
+
           </tr>
-        `).join("")}
+        `
+          )
+          .join("")}
 
       </table>
+
     </div>
 
   </div>
@@ -589,61 +1191,95 @@ app.get("/", async (req, res) => {
   const templates = ${templatesJson};
 
   function previewTemplate() {
-    const html = document.getElementById("templateHtml").value;
+    const html =
+      document.getElementById("templateHtml").value || "";
+
     document.getElementById("previewFrame").srcdoc = html;
   }
 
   function previewCampaign() {
-    const html = document.getElementById("campaignHtml").value;
+    const html =
+      document.getElementById("campaignHtml").value || "";
+
     document.getElementById("previewFrame").srcdoc = html;
   }
 
   function loadTemplate() {
-    const id = document.getElementById("templateSelect").value;
+    const id =
+      document.getElementById("templateSelect").value;
 
     const selected = templates.find(function(t) {
       return String(t.id) === String(id);
     });
 
     if (!selected) {
+      document.getElementById("campaignSubject").value = "";
+      document.getElementById("campaignHtml").value = "";
+      document.getElementById("previewFrame").srcdoc = "";
       return;
     }
 
-    document.getElementById("campaignSubject").value = selected.subject;
-    document.getElementById("campaignHtml").value = selected.html;
-    document.getElementById("previewFrame").srcdoc = selected.html;
+    document.getElementById("campaignSubject").value =
+      selected.subject || "";
+
+    document.getElementById("campaignHtml").value =
+      selected.html || "";
+
+    document.getElementById("previewFrame").srcdoc =
+      selected.html || "";
   }
 
   function loadManualTemplate() {
-    const id = document.getElementById("manualTemplateSelect").value;
+    const id =
+      document.getElementById("manualTemplateSelect").value;
 
     const selected = templates.find(function(t) {
       return String(t.id) === String(id);
     });
 
     if (!selected) {
+      document.getElementById("manualSubject").value = "";
+      document.getElementById("manualHtml").value = "";
+      document.getElementById("manualPreviewFrame").srcdoc = "";
       return;
     }
 
-    document.getElementById("manualSubject").value = selected.subject;
-    document.getElementById("manualHtml").value = selected.html;
-    document.getElementById("manualPreviewFrame").srcdoc = selected.html;
+    document.getElementById("manualSubject").value =
+      selected.subject || "";
+
+    document.getElementById("manualHtml").value =
+      selected.html || "";
+
+    document.getElementById("manualPreviewFrame").srcdoc =
+      selected.html || "";
   }
 
   function previewManual() {
-    const html = document.getElementById("manualHtml").value;
-    document.getElementById("manualPreviewFrame").srcdoc = html;
+    const html =
+      document.getElementById("manualHtml").value || "";
+
+    document.getElementById("manualPreviewFrame").srcdoc =
+      html;
   }
 
   function analyzeManualRecipients() {
-    const raw = document.getElementById("manualRecipients").value || "";
+    const raw =
+      document.getElementById("manualRecipients").value || "";
+
     const items = raw
-      .split(/\r?\n|,|;/)
-      .map(function(value) { return String(value || "").trim().toLowerCase(); })
+      .split(/\\r?\\n|,|;/)
+      .map(function(value) {
+        return String(value || "")
+          .trim()
+          .toLowerCase();
+      })
       .filter(Boolean);
 
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const emailRegex =
+      /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/;
+
     const seen = new Set();
+
     let valid = 0;
     let invalid = 0;
     let duplicates = 0;
@@ -663,10 +1299,17 @@ app.get("/", async (req, res) => {
       valid++;
     });
 
-    document.getElementById("manualTotal").textContent = items.length;
-    document.getElementById("manualValid").textContent = valid;
-    document.getElementById("manualInvalid").textContent = invalid;
-    document.getElementById("manualDuplicates").textContent = duplicates;
+    document.getElementById("manualTotal").textContent =
+      items.length;
+
+    document.getElementById("manualValid").textContent =
+      valid;
+
+    document.getElementById("manualInvalid").textContent =
+      invalid;
+
+    document.getElementById("manualDuplicates").textContent =
+      duplicates;
   }
 </script>
 
@@ -675,116 +1318,220 @@ app.get("/", async (req, res) => {
     `);
 
   } catch (error) {
-    console.error(error);
-    res.status(500).send("Erro ao carregar dashboard");
+    console.error("Dashboard error:", error);
+
+    res.status(500).send(
+      "Erro ao carregar dashboard"
+    );
   }
 });
 
-app.post("/import-contacts", upload.single("file"), async (req, res) => {
-  try {
-    if (!req.file || !req.file.buffer) {
-      return res.status(400).send("Arquivo não enviado");
-    }
+app.post(
+  "/import-contacts",
+  upload.single("file"),
+  async (req, res) => {
+    try {
+      if (!req.file || !req.file.buffer) {
+        return res
+          .status(400)
+          .send("Arquivo não enviado");
+      }
 
-    const fileContent = req.file.buffer.toString("utf-8");
+      const fileContent =
+        req.file.buffer.toString("utf-8");
 
-    const emails = fileContent
-      .split(/\r?\n|,|;/)
-      .map(cleanEmail)
-      .filter(isValidEmail);
+      const emails = fileContent
+        .split(/\r?\n|,|;/)
+        .map(cleanEmail)
+        .filter(isValidEmail);
 
-    const uniqueEmails = [...new Set(emails)];
+      const uniqueEmails = [
+        ...new Set(emails)
+      ];
 
-    let inserted = 0;
-    let duplicated = 0;
+      let inserted = 0;
+      let duplicated = 0;
 
-    for (const email of uniqueEmails) {
-      const result = await pool.query(
-        `
-        INSERT INTO contacts (email)
-        VALUES ($1)
-        ON CONFLICT (email) DO NOTHING
-        RETURNING id
-        `,
-        [email]
+      for (const email of uniqueEmails) {
+        const result = await pool.query(
+          `
+          INSERT INTO contacts (email)
+          VALUES ($1)
+          ON CONFLICT (email) DO NOTHING
+          RETURNING id
+          `,
+          [email]
+        );
+
+        if (result.rows.length > 0) {
+          inserted++;
+        } else {
+          duplicated++;
+        }
+      }
+
+      res.send(`
+        <body
+          style="
+            background:#111;
+            color:white;
+            font-family:Arial;
+            padding:40px;
+          "
+        >
+
+          <h1>
+            Importação finalizada
+          </h1>
+
+          <p>
+            Novos contatos: ${inserted}
+          </p>
+
+          <p>
+            Duplicados ignorados: ${duplicated}
+          </p>
+
+          <p>
+            Total lido no arquivo: ${uniqueEmails.length}
+          </p>
+
+          <a
+            style="color:#a78bfa;"
+            href="/"
+          >
+            Voltar ao painel
+          </a>
+
+        </body>
+      `);
+
+    } catch (error) {
+      console.error(
+        "Import contacts error:",
+        error
       );
 
-      if (result.rows.length > 0) {
-        inserted++;
-      } else {
-        duplicated++;
-      }
+      res
+        .status(500)
+        .send("Erro ao importar contatos");
     }
-
-    res.send(`
-      <body style="background:#111;color:white;font-family:Arial;padding:40px;">
-
-        <h1>Importação finalizada</h1>
-
-        <p>Novos contatos: ${inserted}</p>
-
-        <p>Duplicados ignorados: ${duplicated}</p>
-
-        <p>Total lido no arquivo: ${uniqueEmails.length}</p>
-
-        <a style="color:#a78bfa;" href="/">
-          Voltar ao painel
-        </a>
-
-      </body>
-    `);
-
-  } catch (error) {
-    console.error(error);
-    res.status(500).send("Erro ao importar contatos");
   }
-});
+);
 
 app.post("/save-template", async (req, res) => {
   try {
-    const { name, subject, html } = req.body;
+    const {
+      name,
+      subject,
+      html
+    } = req.body;
+
+    if (
+      !String(name || "").trim() ||
+      !String(subject || "").trim() ||
+      !String(html || "").trim()
+    ) {
+      return res
+        .status(400)
+        .send(
+          "Nome, assunto e HTML são obrigatórios."
+        );
+    }
 
     await pool.query(
       `
-      INSERT INTO templates (name, subject, html)
+      INSERT INTO templates (
+        name,
+        subject,
+        html
+      )
       VALUES ($1, $2, $3)
       `,
-      [name, subject, html]
+      [
+        String(name).trim(),
+        String(subject).trim(),
+        String(html)
+      ]
     );
 
-    res.redirect("/");
+    res.redirect("/#template");
 
   } catch (error) {
-    console.error(error);
-    res.status(500).send("Erro ao salvar template");
+    console.error(
+      "Save template error:",
+      error
+    );
+
+    res
+      .status(500)
+      .send("Erro ao salvar template");
   }
 });
-
 app.post("/create-manual-campaign", async (req, res) => {
   const client = await pool.connect();
 
   try {
-    const { recipients, name, subject, html, dailyLimit } = req.body;
+    const {
+      recipients,
+      name,
+      subject,
+      html,
+      dailyLimit
+    } = req.body;
 
-    const parsed = parseManualEmails(recipients);
+    const parsed =
+      parseManualEmails(recipients);
 
     if (parsed.valid.length === 0) {
-      return res.status(400).send("Nenhum e-mail válido foi informado para o envio manual.");
+      return res
+        .status(400)
+        .send(
+          "Nenhum e-mail válido foi informado para o envio manual."
+        );
+    }
+
+    if (!String(subject || "").trim()) {
+      return res
+        .status(400)
+        .send(
+          "O assunto da campanha é obrigatório."
+        );
+    }
+
+    if (!String(html || "").trim()) {
+      return res
+        .status(400)
+        .send(
+          "O HTML da campanha é obrigatório."
+        );
     }
 
     const campaignName =
       String(name || "").trim() ||
-      "Manual - " + new Date().toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" });
+      "Manual - " +
+        new Date().toLocaleString(
+          "pt-BR",
+          {
+            timeZone:
+              "America/Sao_Paulo"
+          }
+        );
 
-    const batchLimit = Math.max(
-      1,
-      parseInt(dailyLimit || "100", 10) || 100
-    );
+    const batchLimit =
+      Math.max(
+        1,
+        parseInt(
+          dailyLimit || "100",
+          10
+        ) || 100
+      );
 
     await client.query("BEGIN");
 
-    const campaignResult = await client.query(
-      `
+    const campaignResult =
+      await client.query(
+        `
         INSERT INTO campaigns (
           name,
           subject,
@@ -792,31 +1539,46 @@ app.post("/create-manual-campaign", async (req, res) => {
           daily_limit,
           status
         )
-        VALUES ($1, $2, $3, $4, 'active')
+        VALUES (
+          $1,
+          $2,
+          $3,
+          $4,
+          'active'
+        )
         RETURNING id
-      `,
-      [
-        campaignName,
-        subject,
-        html,
-        batchLimit
-      ]
-    );
+        `,
+        [
+          campaignName,
+          String(subject).trim(),
+          String(html),
+          batchLimit
+        ]
+      );
 
-    const campaignId = campaignResult.rows[0].id;
+    const campaignId =
+      campaignResult.rows[0].id;
 
     for (const email of parsed.valid) {
       await client.query(
         `
-          INSERT INTO email_logs (
-            campaign_id,
-            contact_id,
-            email,
-            status
-          )
-          VALUES ($1, NULL, $2, 'pending')
-          ON CONFLICT (campaign_id, email)
-          DO NOTHING
+        INSERT INTO email_logs (
+          campaign_id,
+          contact_id,
+          email,
+          status
+        )
+        VALUES (
+          $1,
+          NULL,
+          $2,
+          'pending'
+        )
+        ON CONFLICT (
+          campaign_id,
+          email
+        )
+        DO NOTHING
         `,
         [
           campaignId,
@@ -830,9 +1592,26 @@ app.post("/create-manual-campaign", async (req, res) => {
     res.redirect("/#campanhas");
 
   } catch (error) {
-    await client.query("ROLLBACK");
-    console.error(error);
-    res.status(500).send("Erro ao criar campanha manual");
+    try {
+      await client.query("ROLLBACK");
+    } catch (rollbackError) {
+      console.error(
+        "Rollback error:",
+        rollbackError
+      );
+    }
+
+    console.error(
+      "Create manual campaign error:",
+      error
+    );
+
+    res
+      .status(500)
+      .send(
+        "Erro ao criar campanha manual"
+      );
+
   } finally {
     client.release();
   }
@@ -840,29 +1619,75 @@ app.post("/create-manual-campaign", async (req, res) => {
 
 app.post("/create-campaign", async (req, res) => {
   try {
-    const { name, subject, html, dailyLimit } = req.body;
+    const {
+      name,
+      subject,
+      html,
+      dailyLimit
+    } = req.body;
 
-    const campaignResult = await pool.query(
-      `
-      INSERT INTO campaigns (
-        name,
-        subject,
-        html,
-        daily_limit,
-        status
-      )
-      VALUES ($1, $2, $3, $4, 'active')
-      RETURNING id
-      `,
-      [
-        name,
-        subject,
-        html,
-        parseInt(dailyLimit || "30")
-      ]
-    );
+    if (!String(name || "").trim()) {
+      return res
+        .status(400)
+        .send(
+          "O nome da campanha é obrigatório."
+        );
+    }
 
-    const campaignId = campaignResult.rows[0].id;
+    if (!String(subject || "").trim()) {
+      return res
+        .status(400)
+        .send(
+          "O assunto da campanha é obrigatório."
+        );
+    }
+
+    if (!String(html || "").trim()) {
+      return res
+        .status(400)
+        .send(
+          "O HTML da campanha é obrigatório."
+        );
+    }
+
+    const batchLimit =
+      Math.max(
+        1,
+        parseInt(
+          dailyLimit || "30",
+          10
+        ) || 30
+      );
+
+    const campaignResult =
+      await pool.query(
+        `
+        INSERT INTO campaigns (
+          name,
+          subject,
+          html,
+          daily_limit,
+          status
+        )
+        VALUES (
+          $1,
+          $2,
+          $3,
+          $4,
+          'active'
+        )
+        RETURNING id
+        `,
+        [
+          String(name).trim(),
+          String(subject).trim(),
+          String(html),
+          batchLimit
+        ]
+      );
+
+    const campaignId =
+      campaignResult.rows[0].id;
 
     await pool.query(
       `
@@ -879,96 +1704,265 @@ app.post("/create-campaign", async (req, res) => {
         'pending'
       FROM contacts
       WHERE status = 'active'
-      ON CONFLICT (campaign_id, email)
-      DO NOTHING
-      `,
-      [campaignId]
-    );
-
-    res.redirect("/");
-
-  } catch (error) {
-    console.error(error);
-    res.status(500).send("Erro ao criar campanha");
-  }
-});
-
-app.post("/add-new-to-campaign/:id", async (req, res) => {
-  try {
-    const campaignId = req.params.id;
-
-    await pool.query(
-      `
-      INSERT INTO email_logs (
+      ON CONFLICT (
         campaign_id,
-        contact_id,
-        email,
-        status
+        email
       )
-      SELECT
-        $1,
-        id,
-        email,
-        'pending'
-      FROM contacts
-      WHERE status = 'active'
-      ON CONFLICT (campaign_id, email)
       DO NOTHING
       `,
       [campaignId]
     );
 
-    res.redirect("/");
+    res.redirect("/#campanhas");
 
   } catch (error) {
-    console.error(error);
-    res.status(500).send("Erro ao adicionar novos contatos");
+    console.error(
+      "Create campaign error:",
+      error
+    );
+
+    res
+      .status(500)
+      .send(
+        "Erro ao criar campanha"
+      );
   }
 });
+
+app.post(
+  "/add-new-to-campaign/:id",
+  async (req, res) => {
+    try {
+      const campaignId =
+        req.params.id;
+
+      const campaignCheck =
+        await pool.query(
+          `
+          SELECT id
+          FROM campaigns
+          WHERE id = $1
+          `,
+          [campaignId]
+        );
+
+      if (
+        campaignCheck.rows.length === 0
+      ) {
+        return res
+          .status(404)
+          .send(
+            "Campanha não encontrada"
+          );
+      }
+
+      await pool.query(
+        `
+        INSERT INTO email_logs (
+          campaign_id,
+          contact_id,
+          email,
+          status
+        )
+        SELECT
+          $1,
+          id,
+          email,
+          'pending'
+        FROM contacts
+        WHERE status = 'active'
+        ON CONFLICT (
+          campaign_id,
+          email
+        )
+        DO NOTHING
+        `,
+        [campaignId]
+      );
+
+      res.redirect("/#campanhas");
+
+    } catch (error) {
+      console.error(
+        "Add new contacts error:",
+        error
+      );
+
+      res
+        .status(500)
+        .send(
+          "Erro ao adicionar novos contatos"
+        );
+    }
+  }
+);
 
 app.post("/send-batch/:id", async (req, res) => {
   try {
-    const campaignId = req.params.id;
+    const campaignId =
+      req.params.id;
 
-    const campaignResult = await pool.query(
-      `SELECT * FROM campaigns WHERE id = $1`,
-      [campaignId]
-    );
+    const campaignResult =
+      await pool.query(
+        `
+        SELECT *
+        FROM campaigns
+        WHERE id = $1
+        `,
+        [campaignId]
+      );
 
-    if (campaignResult.rows.length === 0) {
-      return res.status(404).send("Campanha não encontrada");
+    if (
+      campaignResult.rows.length === 0
+    ) {
+      return res
+        .status(404)
+        .send(
+          "Campanha não encontrada"
+        );
     }
 
-    const campaign = campaignResult.rows[0];
+    const campaign =
+      campaignResult.rows[0];
 
-    const pendingResult = await pool.query(
-      `
-      SELECT *
-      FROM email_logs
-      WHERE campaign_id = $1
-      AND status = 'pending'
-      ORDER BY id ASC
-      LIMIT $2
-      `,
-      [
-        campaignId,
-        campaign.daily_limit
-      ]
-    );
+    if (
+      !String(
+        campaign.subject || ""
+      ).trim()
+    ) {
+      return res
+        .status(400)
+        .send(
+          "Campanha sem assunto. Envio bloqueado."
+        );
+    }
 
-    const pending = pendingResult.rows;
+    if (
+      !String(
+        campaign.html || ""
+      ).trim()
+    ) {
+      return res
+        .status(400)
+        .send(
+          "Campanha sem HTML. Envio bloqueado."
+        );
+    }
+
+    const dailyLimit =
+      Math.max(
+        1,
+        parseInt(
+          campaign.daily_limit || 1,
+          10
+        ) || 1
+      );
+
+    const pendingResult =
+      await pool.query(
+        `
+        SELECT *
+        FROM email_logs
+        WHERE campaign_id = $1
+        AND status = 'pending'
+        ORDER BY id ASC
+        LIMIT $2
+        `,
+        [
+          campaignId,
+          dailyLimit
+        ]
+      );
+
+    const pending =
+      pendingResult.rows;
 
     const results = [];
 
+    if (pending.length === 0) {
+      return res.send(`
+        <body
+          style="
+            background:#111;
+            color:white;
+            font-family:Arial;
+            padding:40px;
+          "
+        >
+
+          <h1>
+            Nenhum pendente
+          </h1>
+
+          <p>
+            Esta campanha não possui
+            destinatários pendentes para
+            este lote.
+          </p>
+
+          <a
+            style="color:#a78bfa;"
+            href="/#campanhas"
+          >
+            Voltar ao painel
+          </a>
+
+        </body>
+      `);
+    }
+
     for (const item of pending) {
       try {
-        const data = await resend.emails.send({
-          from: FROM_EMAIL,
-          to: item.email,
-          replyTo: REPLY_TO_EMAIL,
-          subject: campaign.subject,
-          html: campaign.html
-        });
+        if (
+          !isValidEmail(item.email)
+        ) {
+          throw new Error(
+            "E-mail inválido: " +
+            item.email
+          );
+        }
+
+        const trackedHtml =
+          addTrackingToHtml(
+            campaign.html,
+            item.id
+          );
+
+        const {
+          data,
+          error
+        } =
+          await resend.emails.send({
+            from: FROM_EMAIL,
+            to: item.email,
+            replyTo:
+              REPLY_TO_EMAIL,
+            subject:
+              campaign.subject,
+            html:
+              trackedHtml
+          });
+
+        if (error) {
+          const resendMessage =
+            error.message ||
+            error.name ||
+            JSON.stringify(error);
+
+          throw new Error(
+            "Resend recusou o envio: " +
+            resendMessage
+          );
+        }
+
+        if (
+          !data ||
+          !data.id
+        ) {
+          throw new Error(
+            "Resend não retornou ID de envio. O e-mail não foi marcado como enviado."
+          );
+        }
 
         await pool.query(
           `
@@ -987,14 +1981,29 @@ app.post("/send-batch/:id", async (req, res) => {
         );
 
         results.push({
-          email: item.email,
-          status: "sent",
-          id: data.id
+          email:
+            item.email,
+          status:
+            "sent",
+          id:
+            data.id
         });
 
-        await new Promise(resolve => setTimeout(resolve, 1500));
+        await new Promise(
+          resolve =>
+            setTimeout(
+              resolve,
+              1500
+            )
+        );
 
       } catch (error) {
+        const errorMessage =
+          error &&
+          error.message
+            ? error.message
+            : String(error);
+
         await pool.query(
           `
           UPDATE email_logs
@@ -1004,27 +2013,53 @@ app.post("/send-batch/:id", async (req, res) => {
           WHERE id = $2
           `,
           [
-            error.message,
+            errorMessage,
             item.id
           ]
         );
 
         results.push({
-          email: item.email,
-          status: "error",
-          error: error.message
+          email:
+            item.email,
+          status:
+            "error",
+          error:
+            errorMessage
         });
       }
     }
 
-    res.send(`
-      <body style="background:#111;color:white;font-family:Arial;padding:40px;">
+    const sentCount =
+      results.filter(
+        item =>
+          item.status === "sent"
+      ).length;
 
-        <h1>Lote enviado</h1>
+    const errorCount =
+      results.filter(
+        item =>
+          item.status === "error"
+      ).length;
+
+    res.send(`
+      <body
+        style="
+          background:#111;
+          color:white;
+          font-family:Arial;
+          padding:40px;
+        "
+      >
+
+        <h1>
+          Lote processado
+        </h1>
 
         <p>
           Campanha:
-          ${escapeHtml(campaign.name)}
+          ${escapeHtml(
+            campaign.name
+          )}
         </p>
 
         <p>
@@ -1032,11 +2067,35 @@ app.post("/send-batch/:id", async (req, res) => {
           ${results.length}
         </p>
 
-        <pre style="background:#222;padding:20px;border-radius:10px;white-space:pre-wrap;">
-${escapeHtml(JSON.stringify(results, null, 2))}
-        </pre>
+        <p>
+          Enviados com ID real da Resend:
+          ${sentCount}
+        </p>
 
-        <a style="color:#a78bfa;" href="/">
+        <p>
+          Erros:
+          ${errorCount}
+        </p>
+
+        <pre
+          style="
+            background:#222;
+            padding:20px;
+            border-radius:10px;
+            white-space:pre-wrap;
+          "
+        >${escapeHtml(
+          JSON.stringify(
+            results,
+            null,
+            2
+          )
+        )}</pre>
+
+        <a
+          style="color:#a78bfa;"
+          href="/#campanhas"
+        >
           Voltar ao painel
         </a>
 
@@ -1044,20 +2103,38 @@ ${escapeHtml(JSON.stringify(results, null, 2))}
     `);
 
   } catch (error) {
-    console.error(error);
-    res.status(500).send("Erro ao enviar lote");
+    console.error(
+      "Send batch error:",
+      error
+    );
+
+    res
+      .status(500)
+      .send(
+        "Erro ao enviar lote"
+      );
   }
 });
 
-const PORT = process.env.PORT || 3000;
+const PORT =
+  process.env.PORT || 3000;
 
 initDatabase()
   .then(() => {
-    app.listen(PORT, () => {
-      console.log("App Clarity email dashboard online");
-    });
+    app.listen(
+      PORT,
+      () => {
+        console.log(
+          "App Clarity email dashboard online"
+        );
+      }
+    );
   })
   .catch(error => {
-    console.error("Database init error:", error);
+    console.error(
+      "Database init error:",
+      error
+    );
+
     process.exit(1);
   });
